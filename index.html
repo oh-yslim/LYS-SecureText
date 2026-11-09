@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="light dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6WWG+HHkh0UT0zzqfSyfTbvHIzZhWJMfNLGIuxOsLwY='; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Secure Text · 로컬 암호화</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5AdtT5hZi6fflT+37+K0OZUfay41Abcb+9Xuvh+BXuE='; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Secure Text · Browser-only encryption</title>
   <style>
     :root { color-scheme: light; --bg:#f6f8fc; --panel:#fff; --ink:#172238; --muted:#64748b; --line:#dbe2eb; --accent:#1661d8; --soft:#eff5ff; --danger:#b42318; --shadow:0 16px 48px rgba(18,38,74,.07); }
     :root[data-theme="dark"] { color-scheme: dark; --bg:#0e1420; --panel:#172131; --ink:#eef3fd; --muted:#a5b3c8; --line:#334259; --accent:#7eafff; --soft:#202f46; --danger:#ff9890; --shadow:none; }
@@ -56,81 +56,81 @@
   <header>
     <div>
       <h1>🔒 Secure Text</h1>
-      <p class="subtitle">브라우저 안에서만 암호화 · 서버 저장 없음</p>
+      <p class="subtitle">Encrypt locally · No server-side storage</p>
     </div>
-    <button id="themeButton" class="theme" type="button" aria-label="테마 전환">테마 변경</button>
+    <button id="themeButton" class="theme" type="button" aria-label="Change theme">Change theme</button>
   </header>
   <div class="panel">
-    <div class="tabs" role="tablist" aria-label="작업 선택">
+    <div class="tabs" role="tablist" aria-label="Choose operation">
       <button id="encryptTab" type="button" role="tab" aria-selected="true" aria-controls="encryptPane">Encrypt</button>
       <button id="decryptTab" type="button" role="tab" aria-selected="false" aria-controls="decryptPane">Decrypt</button>
     </div>
 
     <section id="encryptPane" role="tabpanel" aria-labelledby="encryptTab">
-      <h2>텍스트 암호화</h2>
+      <h2>Encrypt text</h2>
       <form id="encryptForm" autocomplete="off">
         <div class="field">
-          <label for="plainInput">평문</label>
-          <textarea id="plainInput" rows="5" placeholder="암호화할 텍스트를 입력하세요" spellcheck="false" required></textarea>
-          <p class="hint">최대 16 KiB (UTF-8 기준)</p>
+          <label for="plainInput">Plaintext</label>
+          <textarea id="plainInput" rows="5" placeholder="Enter text to encrypt" spellcheck="false" required></textarea>
+          <p class="hint">Maximum 16 KiB (UTF-8).</p>
         </div>
         <div class="passwords">
           <div class="field">
-            <label for="encryptPassword">비밀번호</label>
-            <input id="encryptPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+            <label for="encryptPassword">Password (optional)</label>
+            <input id="encryptPassword" type="password" autocomplete="new-password" maxlength="1024">
           </div>
           <div class="field">
-            <label for="confirmPassword">비밀번호 확인</label>
-            <input id="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+            <label for="confirmPassword">Confirm password</label>
+            <input id="confirmPassword" type="password" autocomplete="new-password" maxlength="1024">
           </div>
         </div>
-        <p class="hint">12자 이상 필요. 길고 무작위인 비밀번호를 권장합니다. 비밀번호는 URL에 포함되지 않습니다.</p>
+        <p class="hint">Minimum length: 0 characters. A long, random password is strongly recommended. An empty password provides no confidentiality. Passwords are not included in URLs.</p>
         <div class="actions">
-          <button id="encryptButton" class="primary" type="submit">암호화</button>
-          <button id="clearEncrypt" type="button">초기화</button>
+          <button id="encryptButton" class="primary" type="submit">Encrypt</button>
+          <button id="clearEncrypt" type="button">Clear</button>
         </div>
       </form>
       <div id="encryptResult" class="result" hidden>
         <div class="field">
-          <label for="encryptedUrl">공유 URL</label>
+          <label for="encryptedUrl">Shareable URL</label>
           <textarea id="encryptedUrl" rows="3" readonly spellcheck="false"></textarea>
-          <div class="actions"><button id="copyUrl" type="button">URL 복사</button></div>
+          <div class="actions"><button id="copyUrl" type="button">Copy URL</button></div>
         </div>
         <div class="field">
-          <label for="encryptedData">암호문 (Base64URL)</label>
+          <label for="encryptedData">Encrypted data (Base64URL)</label>
           <textarea id="encryptedData" rows="3" readonly spellcheck="false"></textarea>
-          <div class="actions"><button id="copyEncrypted" type="button">암호문 복사</button></div>
+          <div class="actions"><button id="copyEncrypted" type="button">Copy encrypted data</button></div>
         </div>
         <p id="urlLengthNote" class="note"></p>
       </div>
     </section>
 
     <section id="decryptPane" role="tabpanel" aria-labelledby="decryptTab" hidden>
-      <h2>텍스트 복호화</h2>
+      <h2>Decrypt text</h2>
       <form id="decryptForm" autocomplete="off">
         <div class="field">
-          <label for="decryptData">암호문 또는 공유 URL</label>
-          <textarea id="decryptData" rows="4" spellcheck="false" placeholder="Base64URL 암호문, #data=..., 또는 전체 공유 URL" required></textarea>
+          <label for="decryptData">Encrypted data or shareable URL</label>
+          <textarea id="decryptData" rows="4" spellcheck="false" placeholder="Base64URL data, #data=..., or full shareable URL" required></textarea>
         </div>
         <div class="field">
-          <label for="decryptPassword">비밀번호</label>
-          <input id="decryptPassword" type="password" autocomplete="off" maxlength="1024" required>
+          <label for="decryptPassword">Password</label>
+          <input id="decryptPassword" type="password" autocomplete="off" maxlength="1024" placeholder="Leave blank if no password was used">
         </div>
         <div class="actions">
-          <button id="decryptButton" class="primary" type="submit">복호화</button>
-          <button id="clearDecrypt" type="button">초기화 및 주소창 링크 제거</button>
+          <button id="decryptButton" class="primary" type="submit">Decrypt</button>
+          <button id="clearDecrypt" type="button">Clear fields and address fragment</button>
         </div>
       </form>
       <div id="decryptResult" class="result" hidden>
-        <label for="decryptedText">복호화 결과</label>
+        <label for="decryptedText">Decrypted plaintext</label>
         <textarea id="decryptedText" readonly spellcheck="false"></textarea>
-        <div class="actions"><button id="copyPlain" type="button">평문 복사</button></div>
+        <div class="actions"><button id="copyPlain" type="button">Copy plaintext</button></div>
       </div>
     </section>
 
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </div>
-  <footer>Web Crypto API · AES-256-GCM · PBKDF2-SHA256 (600,000회). 공유 URL과 비밀번호는 서로 다른 경로로 전달하세요.</footer>
+  <footer>Web Crypto API · AES-256-GCM · PBKDF2-SHA256 (600,000 iterations). Share passwords separately from URLs.</footer>
 </main>
 <script>
 (() => {
@@ -176,7 +176,7 @@
     $("encryptTab").disabled = value;
     $("decryptTab").disabled = value;
     $(mode === "encrypt" ? "encryptButton" : "decryptButton").textContent = value
-      ? "처리 중…" : mode === "encrypt" ? "암호화" : "복호화";
+      ? "Working…" : mode === "encrypt" ? "Encrypt" : "Decrypt";
   }
 
   function makeHeader(salt, iv) {
@@ -193,15 +193,15 @@
 
   function parsePackage(packageBytes) {
     if (packageBytes.length < HEADER_BYTES + TAG_BYTES || packageBytes.length > MAX_PACKAGE_BYTES) {
-      throw new Error("암호문 길이가 올바르지 않거나 허용 범위를 초과했습니다.");
+      throw new Error("Encrypted data has an invalid length or exceeds the allowed size.");
     }
     const header = packageBytes.slice(0, HEADER_BYTES);
     if (header[0] !== MAGIC_0 || header[1] !== MAGIC_1 || header[2] !== VERSION || header[3] !== KDF_PBKDF2_SHA256) {
-      throw new Error("지원하지 않는 암호문 형식 또는 버전입니다.");
+      throw new Error("Unsupported encrypted data format or version.");
     }
     const iterations = new DataView(header.buffer).getUint32(4, false);
     if (iterations < ITERATIONS || iterations > MAX_ITERATIONS) {
-      throw new Error("허용하지 않는 키 유도 반복 횟수입니다.");
+      throw new Error("Key derivation iteration count is outside the permitted range.");
     }
     return {
       header,
@@ -222,29 +222,29 @@
 
   function fromBase64Url(text) {
     if (!/^[A-Za-z0-9_-]+$/.test(text) || text.length % 4 === 1 || text.length > Math.ceil(MAX_PACKAGE_BYTES * 4 / 3)) {
-      throw new Error("Base64URL 데이터가 잘못되었거나 너무 깁니다.");
+      throw new Error("Invalid Base64URL data or data exceeds the size limit.");
     }
     let binary;
     try {
       binary = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - text.length % 4) % 4));
     } catch {
-      throw new Error("Base64URL 디코딩에 실패했습니다.");
+      throw new Error("Base64URL decoding failed.");
     }
     const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
     if (toBase64Url(bytes) !== text) {
-      throw new Error("Base64URL 데이터 형식이 올바르지 않습니다.");
+      throw new Error("Non-canonical Base64URL encoding.");
     }
     return bytes;
   }
 
   function extractData(input) {
     let value = input.trim();
-    if (!value) throw new Error("암호문을 입력하세요.");
+    if (!value) throw new Error("Enter encrypted data.");
     if (/^https?:\/\//i.test(value)) {
       try {
         value = new URL(value).hash.slice(1);
       } catch {
-        throw new Error("올바른 URL이 아닙니다.");
+        throw new Error("Invalid shareable URL.");
       }
     } else if (value.startsWith("#")) {
       value = value.slice(1);
@@ -253,25 +253,21 @@
       const params = new URLSearchParams(value);
       if (params.getAll("data").length !== 1 || params.getAll("v").length > 1 ||
           [...params.keys()].some((key) => key !== "v" && key !== "data")) {
-        throw new Error("URL Fragment 구조가 잘못되었습니다.");
+        throw new Error("Invalid URL fragment structure.");
       }
       if ((params.get("v") ?? "1") !== String(VERSION)) {
-        throw new Error("지원하지 않는 URL 버전입니다.");
+        throw new Error("Unsupported URL version.");
       }
       value = params.get("data");
     }
     return value;
   }
 
-  function getPasswordBytes(password, enforceMinimum) {
-    if (enforceMinimum && [...password].length < 12) {
-      throw new Error("비밀번호는 최소 12자 이상이어야 합니다.");
-    }
-    if (!password) throw new Error("비밀번호를 입력하세요.");
+  function getPasswordBytes(password) {
     const bytes = encoder.encode(password.normalize("NFC"));
     if (bytes.length > MAX_PASSWORD_BYTES) {
       bytes.fill(0);
-      throw new Error("비밀번호가 너무 깁니다.");
+      throw new Error("Password exceeds the supported UTF-8 byte length.");
     }
     return bytes;
   }
@@ -291,8 +287,8 @@
     const plainBytes = encoder.encode(plainText);
     let passwordBytes;
     try {
-      passwordBytes = getPasswordBytes(password, true);
-      if (plainBytes.length > MAX_PLAINTEXT_BYTES) throw new Error("평문은 UTF-8 기준 16 KiB를 초과할 수 없습니다.");
+      passwordBytes = getPasswordBytes(password);
+      if (plainBytes.length > MAX_PLAINTEXT_BYTES) throw new Error("Plaintext must not exceed 16 KiB when encoded as UTF-8.");
       const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
       const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
       const header = makeHeader(salt, iv);
@@ -313,7 +309,7 @@
   async function decrypt(data, password) {
     const packed = fromBase64Url(extractData(data));
     const fields = parsePackage(packed);
-    const passwordBytes = getPasswordBytes(password, false);
+    const passwordBytes = getPasswordBytes(password);
     try {
       const key = await deriveAesKey(passwordBytes, fields.salt, fields.iterations, "decrypt");
       let raw;
@@ -323,13 +319,13 @@
           key, fields.ciphertext
         );
       } catch {
-        throw new Error("비밀번호가 틀렸거나 암호문이 손상되었습니다.");
+        throw new Error("Incorrect password or corrupted encrypted data.");
       }
       const plainBytes = new Uint8Array(raw);
       try {
         return decoder.decode(plainBytes);
       } catch {
-        throw new Error("복호화된 데이터가 올바른 UTF-8 텍스트가 아닙니다.");
+        throw new Error("Decrypted data is not valid UTF-8 text.");
       } finally {
         plainBytes.fill(0);
       }
@@ -342,11 +338,11 @@
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      notice("클립보드에 복사했습니다.", "success");
+      notice("Copied to clipboard.", "success");
     } catch {
       $(fieldId).focus();
       $(fieldId).select();
-      notice("자동 복사가 차단되었습니다. 선택된 텍스트를 직접 복사하세요.", "error");
+      notice("Clipboard access was blocked. Copy the selected text manually.", "error");
     }
   }
 
@@ -363,7 +359,7 @@
     $("decryptedText").value = "";
     try {
       parsePackage(fromBase64Url(extractData(fragment)));
-      notice("암호문을 인식했습니다. 비밀번호를 입력하세요.");
+      notice("Encrypted data detected. Enter its password, or leave blank if no password was used.");
     } catch (error) {
       notice(error.message, "error");
     }
@@ -380,10 +376,13 @@
     $("encryptResult").hidden = true;
     $("encryptedUrl").value = "";
     $("encryptedData").value = "";
-    if (password !== confirmation) return notice("비밀번호 확인이 일치하지 않습니다.", "error");
-    if (!crypto?.subtle) return notice("HTTPS 환경의 Web Crypto API가 필요합니다.", "error");
+    if (password !== confirmation) return notice("Passwords do not match.", "error");
+    if (!password && !window.confirm("Warning: An empty password provides no meaningful confidentiality. Anyone with the encrypted data can decrypt it by using an empty password. Continue?")) {
+      return notice("Encryption cancelled.");
+    }
+    if (typeof crypto === "undefined" || !crypto.subtle) return notice("Web Crypto API is unavailable. Open this site over HTTPS.", "error");
     setBusy(true, "encrypt");
-    notice("암호화 중…");
+    notice("Encrypting…");
     try {
       const data = await encrypt(plain, password);
       const url = new URL(location.href);
@@ -395,13 +394,13 @@
       $("encryptResult").hidden = false;
       const size = url.href.length;
       $("urlLengthNote").textContent = size > 8000
-        ? `URL ${size.toLocaleString()}자: 링크 호환성 문제가 발생할 수 있습니다. 암호문 텍스트 복사를 권장합니다.`
+        ? `URL length: ${size.toLocaleString()} characters. It may not work in some apps. Consider copying the encrypted data.`
         : size > 2000
-          ? `URL ${size.toLocaleString()}자: 일부 앱에서 잘릴 수 있습니다.`
-          : `URL ${size.toLocaleString()}자. 비밀번호는 다른 경로로 공유하세요.`;
-      notice("암호화 완료. 비밀번호와 입력 평문은 입력 칸에서 지웠습니다.", "success");
+          ? `URL length: ${size.toLocaleString()} characters. Some apps may truncate it.`
+          : `URL length: ${size.toLocaleString()} characters. Share the password separately.`;
+      notice(password ? "Encryption complete. Password and plaintext fields have been cleared." : "Encryption complete WITHOUT A PASSWORD. Anyone with this link can decrypt its contents.", password ? "success" : "error");
     } catch (error) {
-      notice(error.message || "암호화에 실패했습니다.", "error");
+      notice(error.message || "Encryption failed.", "error");
     } finally {
       setBusy(false, "encrypt");
     }
@@ -415,15 +414,15 @@
     $("decryptPassword").value = "";
     $("decryptResult").hidden = true;
     $("decryptedText").value = "";
-    if (!crypto?.subtle) return notice("HTTPS 환경의 Web Crypto API가 필요합니다.", "error");
+    if (typeof crypto === "undefined" || !crypto.subtle) return notice("Web Crypto API is unavailable. Open this site over HTTPS.", "error");
     setBusy(true, "decrypt");
-    notice("복호화 중…");
+    notice("Decrypting…");
     try {
       $("decryptedText").value = await decrypt(data, password);
       $("decryptResult").hidden = false;
-      notice("복호화 완료. 비밀번호 입력 칸은 비웠습니다.", "success");
+      notice("Decryption complete. The password field has been cleared.", "success");
     } catch (error) {
-      notice(error.message || "복호화에 실패했습니다.", "error");
+      notice(error.message || "Decryption failed.", "error");
     } finally {
       setBusy(false, "decrypt");
     }
@@ -442,7 +441,7 @@
     for (const id of ["decryptData", "decryptPassword", "decryptedText"]) $(id).value = "";
     $("decryptResult").hidden = true;
     clearAddressFragment();
-    notice("화면 및 현재 주소창의 암호문을 지웠습니다.", "success");
+    notice("Fields and the current address fragment have been cleared.", "success");
   });
   $("copyUrl").addEventListener("click", () => copyValue($("encryptedUrl").value, "encryptedUrl"));
   $("copyEncrypted").addEventListener("click", () => copyValue($("encryptedData").value, "encryptedData"));
@@ -451,8 +450,8 @@
   const prefersDark = matchMedia("(prefers-color-scheme: dark)");
   function setTheme(dark) {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
-    $("themeButton").textContent = dark ? "☀ 라이트" : "☾ 다크";
-    $("themeButton").setAttribute("aria-label", dark ? "라이트 테마로 전환" : "다크 테마로 전환");
+    $("themeButton").textContent = dark ? "☀ Light" : "☾ Dark";
+    $("themeButton").setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
   }
   setTheme(prefersDark.matches);
   $("themeButton").addEventListener("click", () => setTheme(document.documentElement.dataset.theme !== "dark"));
