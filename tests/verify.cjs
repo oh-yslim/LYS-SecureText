@@ -34,8 +34,11 @@ async function verify() {
     "0e0001476e04ef4406c84fbd72983d2d0b1b67d4d16444847bebfacbdd90e387",
     "Empty-password Argon2id test failed");
 
-  // Check that the actual browser worker uses the same empty-password mapping.
+  // Verify the new policy and the existing empty-password mapping.
   const workerSource = readFileSync(join(root, "argon2-worker.js"), "utf8");
+  assert.ok(source.includes('max="256"') && source.includes('max="10"'), "Advanced controls missing");
+  assert.ok(source.includes('id="argonPreset"'), "KDF presets missing");
+  assert.ok(source.includes('id="runBenchmark"'), "KDF benchmark missing");
   assert.ok(workerSource.includes("new Uint8Array([0xff])"),
     "Argon2id worker must use the documented empty-password mapping");
 
@@ -43,7 +46,15 @@ async function verify() {
   const pbkdfKey = pbkdf2Sync(password, salt, 600000, 32, "sha256");
   assert.equal(pbkdfKey.toString("hex"), expectedPbkdf, "PBKDF2 known-answer test failed");
 
-  for (const [version, derivedKey] of [[1, pbkdfKey], [2, argonKey]]) {
+  const argonKeyBalanced = await argon.argon2id({
+    password, salt, iterations: 6, memorySize: 32768,
+    parallelism: 1, hashLength: 32, outputType: "binary"
+  });
+  assert.equal(Buffer.from(argonKeyBalanced).toString("hex"),
+    "b30ff726ff05d87f345c6dc9388977bbc190c9104e209eb778c33a4d8094f187",
+    "Balanced Argon2id known-answer test failed");
+
+  for (const [version, derivedKey] of [[1, pbkdfKey], [2, argonKey], [2, argonKeyBalanced]]) {
     const header = new Uint8Array(version === 1 ? 36 : 44);
     const iv = Uint8Array.from({ length: 12 }, (_, i) => i + 100);
     header.set([0x53, 0x43, version, version]);
@@ -54,7 +65,7 @@ async function verify() {
       header.set(iv, 24);
     } else {
       view.setUint32(4, 32768, false);
-      view.setUint32(8, 3, false);
+      view.setUint32(8, derivedKey === argonKey ? 3 : 6, false);
       header[12] = 1;
       header.set(salt, 16);
       header.set(iv, 32);

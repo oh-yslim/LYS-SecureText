@@ -40,6 +40,7 @@ jobs:
         run: |
           node tests/verify.cjs
           node tests/worker-smoke.cjs
+          node tests/contract.cjs
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

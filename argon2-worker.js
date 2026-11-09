@@ -8,8 +8,11 @@ self.onmessage = async (event) => {
   let code = "ARGON2_FAILED";
 
   try {
-    if (input.memorySize !== 32768 || input.iterations !== 3 ||
-        input.parallelism !== 1 || salt.length !== 16 || password.length > 2048) {
+    if (!Number.isSafeInteger(input.memorySize) || input.memorySize < 19 * 1024 ||
+        input.memorySize > 256 * 1024 || input.memorySize % 1024 !== 0 ||
+        !Number.isSafeInteger(input.iterations) || input.iterations < 2 ||
+        input.iterations > 10 || input.parallelism !== 1 ||
+        salt.length !== 16 || password.length > 2048) {
       code = "INVALID_PARAMETERS";
       throw new Error(code);
     }
@@ -32,6 +35,7 @@ self.onmessage = async (event) => {
     const kdfPassword = password.length === 0 ? new Uint8Array([0xff]) : password;
 
     try {
+      const started = performance.now();
       derived = await self.hashwasm.argon2id({
         password: kdfPassword,
         salt,
@@ -41,6 +45,7 @@ self.onmessage = async (event) => {
         hashLength: 32,
         outputType: "binary"
       });
+      input.durationMs = performance.now() - started;
     } catch (error) {
       code = error instanceof RangeError ? "MEMORY_ALLOCATION_FAILED" : "ARGON2_FAILED";
       throw error;
@@ -54,7 +59,7 @@ self.onmessage = async (event) => {
     }
 
     const keyCopy = derived.slice();
-    self.postMessage({ ok: true, key: keyCopy.buffer }, [keyCopy.buffer]);
+    self.postMessage({ ok: true, key: keyCopy.buffer, durationMs: input.durationMs }, [keyCopy.buffer]);
   } catch {
     self.postMessage({ ok: false, code });
   } finally {

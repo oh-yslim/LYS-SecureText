@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="light dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-qapd7g5Joeuf1McY8sX3s6H3+f2L5g6nUdVxN7ABpcc=' 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-QUJP8r2ONgFzKlDuih6FSeBnUJmZAtj6HiycypwUgb0=' 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'">
   <title>CipherLink Lite · Browser-only encryption</title>
   <style>
     :root { color-scheme: light; --bg:#f6f8fc; --panel:#fff; --ink:#172238; --muted:#64748b; --line:#dbe2eb; --accent:#1661d8; --soft:#eff5ff; --danger:#b42318; --shadow:0 16px 48px rgba(18,38,74,.07); }
@@ -46,9 +46,27 @@
     .note { margin-top:10px; padding:9px 12px; border-radius:9px; background:var(--soft); color:var(--muted); font-size:13px; }
     .status { min-height:25px; margin:15px 0 0; color:var(--muted); font-size:14px; overflow-wrap:anywhere; }
     .status[data-kind="error"] { color:var(--danger); }
+    .status[data-kind="warning"] { color:var(--danger); }
     .status[data-kind="success"] { color:var(--accent); }
+    .guidance { font-size:13px; line-height:1.55; margin:8px 0 0; color:var(--muted); }
+    .guidance[data-kind="warning"] { color:var(--danger); font-weight:600; }
+    .guidance[data-kind="error"] { color:var(--danger); }
+    .guidance[data-kind="info"] { color:var(--muted); }
+    .settings { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+    .settings[hidden] { display:none; }
+    .settings .field { margin-bottom:4px; }
+    .settings input { font-variant-numeric:tabular-nums; }
+    .settings-one { margin-top:12px; }
+    .benchmark { background:var(--soft); border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:14px; }
+    .benchmark .actions { margin-top:9px; }
+    .benchmark .status { margin-top:8px; }
+    .warning-text { color:var(--danger); font-size:13px; margin:8px 0 0; }
+    .quiet { font-size:12px; color:var(--muted); }
+    .checkline { display:flex; gap:8px; align-items:center; font-weight:normal; }
+    .checkline input { width:auto; min-height:auto; }
+    .benchmark button { flex:0 0 auto; }
     footer { margin:16px 3px 0; }
-    @media (max-width:550px) { main { margin:18px auto; } .panel { padding:16px; border-radius:13px; } .passwords { grid-template-columns:1fr; gap:0; } .actions button { flex:1 1 auto; } }
+    @media (max-width:550px) { main { margin:18px auto; } .panel { padding:16px; border-radius:13px; } .passwords,.settings { grid-template-columns:1fr; gap:4px; } .actions button { flex:1 1 auto; } }
   </style>
 </head>
 <body>
@@ -77,10 +95,49 @@
         <div class="field">
           <label for="kdfChoice">Key derivation method</label>
           <select id="kdfChoice" name="kdf">
-            <option value="argon2id" selected>Argon2id (recommended · 32 MiB, 3 passes)</option>
-            <option value="pbkdf2">PBKDF2-SHA256 (compatible · 600,000 iterations)</option>
+            <option value="argon2id" selected>Argon2id (memory-hard)</option>
+            <option value="pbkdf2">PBKDF2-SHA256 (built into browsers)</option>
           </select>
-          <p class="hint">Argon2id uses a locally hosted WebAssembly component. Decryption detects the method automatically.</p>
+          <p class="hint">The decryptor reads the algorithm and parameters from the encrypted data automatically.</p>
+          <div id="argonPresetBox" class="settings-one">
+            <label for="argonPreset">Security preset</label>
+            <select id="argonPreset">
+              <option value="compatibility">Compatibility — 32 MiB / 3 passes</option>
+              <option value="balanced" selected>Balanced — 32 MiB / 6 passes</option>
+              <option value="strong">Strong — 64 MiB / 3 passes</option>
+              <option value="high">High — 128 MiB / 3 passes</option>
+              <option value="expert">Expert — 256 MiB / 6 passes</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div id="argonSettings" class="settings">
+            <div class="field">
+              <label for="argonMemory">Memory (MiB)</label>
+              <input id="argonMemory" type="number" min="19" max="256" step="1" value="32" required>
+            </div>
+            <div class="field">
+              <label for="argonPasses">Iterations (passes)</label>
+              <input id="argonPasses" type="number" min="2" max="10" step="1" value="6" required>
+            </div>
+          </div>
+          <p id="argonCompatibility" class="guidance">Decryption requires the same Argon2id memory and iteration settings. High values may prevent decryption on low-memory devices.</p>
+          <div id="pbkdfSettings" class="settings" hidden>
+            <div class="field">
+              <label for="pbkdfIterations">PBKDF2 iterations</label>
+              <input id="pbkdfIterations" type="number" min="600000" max="2000000" step="1" value="600000" disabled>
+            </div>
+          </div>
+          <p class="hint">Argon2id parallelism remains fixed at 1 pending device compatibility tests. Settings are embedded in the ciphertext and cannot be lowered during decryption.</p>
+          <p id="resourceAdvice" class="guidance" role="status" aria-live="polite"></p>
+          <div class="benchmark">
+            <strong>Device Benchmark</strong>
+            <p class="quiet">Run the selected KDF with a disposable test password on this device. This does not send data to a server and does not save results.</p>
+            <div class="actions">
+              <button id="runBenchmark" type="button">Run Benchmark</button>
+              <button id="cancelBenchmark" type="button" hidden>Cancel</button>
+            </div>
+            <p id="benchmarkStatus" class="status" role="status" aria-live="polite">Not tested on this device.</p>
+          </div>
         </div>
         <div class="passwords">
           <div class="field">
@@ -92,7 +149,8 @@
             <input id="confirmPassword" type="password" autocomplete="new-password" maxlength="1024">
           </div>
         </div>
-        <p class="hint">Minimum length: 0 characters. A long, random password is strongly recommended. An empty password provides no confidentiality. Passwords are not included in URLs.</p>
+        <p class="hint">Minimum password length: 0 characters. Passwords never appear in the URL. Strong, unique passwords are recommended.</p>
+        <p id="passwordAdvice" class="guidance" role="status" aria-live="polite"></p>
         <div class="actions">
           <button id="encryptButton" class="primary" type="submit">Encrypt</button>
           <button id="clearEncrypt" type="button">Clear</button>
@@ -119,6 +177,7 @@
         <div class="field">
           <label for="decryptData">Encrypted data or shareable URL</label>
           <textarea id="decryptData" rows="4" spellcheck="false" placeholder="Base64URL data, #data=..., or full shareable URL" required></textarea>
+          <p id="decryptAdvice" class="guidance" aria-live="polite"></p>
         </div>
         <div class="field">
           <label for="decryptPassword">Password</label>
@@ -152,8 +211,12 @@
   const ARGON2ID_ID = 2;
   const PBKDF2_ITERATIONS = 600000;
   const MAX_PBKDF2_ITERATIONS = 2000000;
-  const ARGON_MEMORY_KIB = 32768;
-  const ARGON_PASSES = 3;
+  const DEFAULT_ARGON_MEMORY_MIB = 32;
+  const DEFAULT_ARGON_PASSES = 6;
+  const ARGON_MIN_MEMORY_KIB = 19 * 1024;
+  const ARGON_MAX_MEMORY_KIB = 256 * 1024;
+  const ARGON_MIN_PASSES = 2;
+  const ARGON_MAX_PASSES = 10;
   const ARGON_PARALLELISM = 1;
   const SALT_BYTES = 16;
   const IV_BYTES = 12;
@@ -167,6 +230,11 @@
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const $ = (id) => document.getElementById(id);
   let busy = false;
+  let benchmarkAbort = null;
+  const ARGON_PRESETS = Object.freeze({
+    compatibility: [32, 3], balanced: [32, 6], strong: [64, 3],
+    high: [128, 3], expert: [256, 6]
+  });
 
   function notice(message, kind = "info") {
     $("status").textContent = message;
@@ -189,32 +257,123 @@
     $("decryptButton").disabled = value;
     $("encryptTab").disabled = value;
     $("decryptTab").disabled = value;
-    $("kdfChoice").disabled = value;
-    $(mode === "encrypt" ? "encryptButton" : "decryptButton").textContent = value
-      ? "Working…" : mode === "encrypt" ? "Encrypt" : "Decrypt";
+    for (const id of ["kdfChoice", "argonPreset", "argonMemory", "argonPasses", "pbkdfIterations", "encryptPassword", "confirmPassword"]) {
+      const argonOnly = ["argonPreset", "argonMemory", "argonPasses"].includes(id);
+      const pbkdfOnly = id === "pbkdfIterations";
+      $(id).disabled = value || (argonOnly && $("kdfChoice").value !== "argon2id") ||
+        (pbkdfOnly && $("kdfChoice").value !== "pbkdf2");
+    }
+    $("encryptButton").textContent = value && mode === "encrypt" ? "Working…" : "Encrypt";
+    $("decryptButton").textContent = value && mode === "decrypt" ? "Working…" : "Decrypt";
+    $("runBenchmark").disabled = value;
+    $("cancelBenchmark").hidden = !value || mode !== "benchmark" || !benchmarkAbort;
   }
 
-  function makeV1Header(salt, iv) {
+  function integerInRange(value, min, max) {
+    return Number.isSafeInteger(value) && value >= min && value <= max;
+  }
+
+  function encryptionSettings() {
+    const choice = $("kdfChoice").value;
+    if (choice === "pbkdf2") {
+      const iterations = $("pbkdfIterations").valueAsNumber;
+      if (!integerInRange(iterations, PBKDF2_ITERATIONS, MAX_PBKDF2_ITERATIONS)) {
+        throw new Error("PBKDF2 iterations must be between 600,000 and 2,000,000.");
+      }
+      return { kdfName: choice, iterations };
+    }
+    if (choice === "argon2id") {
+      const memoryMiB = $("argonMemory").valueAsNumber;
+      const iterations = $("argonPasses").valueAsNumber;
+      if (!integerInRange(memoryMiB, 19, 256) || !integerInRange(iterations, ARGON_MIN_PASSES, ARGON_MAX_PASSES)) {
+        throw new Error("Argon2id requires 19–256 MiB of memory and 2–10 passes.");
+      }
+      return { kdfName: choice, memorySize: memoryMiB * 1024, iterations, parallelism: ARGON_PARALLELISM };
+    }
+    throw new Error("Unknown key derivation method.");
+  }
+
+  function updateGuidance() {
+    const argon = $("kdfChoice").value === "argon2id";
+    $("argonSettings").hidden = !argon;
+    $("argonPresetBox").hidden = !argon;
+    $("argonCompatibility").hidden = !argon;
+    $("pbkdfSettings").hidden = argon;
+    if (!busy) {
+      $("argonMemory").disabled = !argon;
+      $("argonPasses").disabled = !argon;
+      $("argonPreset").disabled = !argon;
+      $("pbkdfIterations").disabled = argon;
+    }
+
+    const pass = $("encryptPassword").value;
+    const confirm = $("confirmPassword").value;
+    const passwordAdvice = $("passwordAdvice");
+    let passwordMessage;
+    let passwordKind;
+    if (!pass) {
+      passwordMessage = "Warning: An empty password provides no confidentiality. Anyone with the encrypted link can decrypt it using an empty password.";
+      passwordKind = "warning";
+    } else if (confirm && pass !== confirm) {
+      passwordMessage = "Passwords do not match.";
+      passwordKind = "error";
+    } else if ([...pass].length < 12) {
+      passwordMessage = "Warning: Short passwords are easier to guess. Use a long, unpredictable password for sensitive data.";
+      passwordKind = "warning";
+    } else {
+      passwordMessage = "Use a unique, unpredictable password. Length alone does not guarantee strength.";
+      passwordKind = "info";
+    }
+    if (passwordAdvice.textContent !== passwordMessage) passwordAdvice.textContent = passwordMessage;
+    passwordAdvice.dataset.kind = passwordKind;
+
+    const advice = $("resourceAdvice");
+    let message, kind = "info";
+    try {
+      const settings = encryptionSettings();
+      if (argon) {
+        const memory = settings.memorySize / 1024;
+        message = `Argon2id: ${memory} MiB, ${settings.iterations} passes, parallelism 1. The same costs apply when decrypting.`;
+        if (memory > 64 || settings.iterations > 6) {
+          message += " Warning: High settings may be slow or run out of memory on mobile devices.";
+          kind = "warning";
+        }
+      } else {
+        message = `PBKDF2: ${settings.iterations.toLocaleString("en-US")} iterations. The same cost applies when decrypting.`;
+        if (settings.iterations >= 1500000) {
+          message += " Warning: Decryption may take noticeably longer on older devices.";
+          kind = "warning";
+        }
+      }
+    } catch (error) {
+      message = error.message;
+      kind = "error";
+    }
+    if (advice.textContent !== message) advice.textContent = message;
+    advice.dataset.kind = kind;
+  }
+
+  function makeV1Header(salt, iv, iterations) {
     const header = new Uint8Array(V1_HEADER_BYTES);
     header[0] = MAGIC_0;
     header[1] = MAGIC_1;
     header[2] = V1;
     header[3] = PBKDF2_ID;
-    new DataView(header.buffer).setUint32(4, PBKDF2_ITERATIONS, false);
+    new DataView(header.buffer).setUint32(4, iterations, false);
     header.set(salt, 8);
     header.set(iv, 24);
     return header;
   }
 
-  function makeV2Header(salt, iv) {
+  function makeV2Header(salt, iv, memorySize, iterations) {
     const header = new Uint8Array(V2_HEADER_BYTES);
     const view = new DataView(header.buffer);
     header[0] = MAGIC_0;
     header[1] = MAGIC_1;
     header[2] = V2;
     header[3] = ARGON2ID_ID;
-    view.setUint32(4, ARGON_MEMORY_KIB, false);
-    view.setUint32(8, ARGON_PASSES, false);
+    view.setUint32(4, memorySize, false);
+    view.setUint32(8, iterations, false);
     header[12] = ARGON_PARALLELISM;
     header.set(salt, 16);
     header.set(iv, 32);
@@ -258,7 +417,9 @@
       const memorySize = view.getUint32(4, false);
       const iterations = view.getUint32(8, false);
       const parallelism = header[12];
-      if (memorySize !== ARGON_MEMORY_KIB || iterations !== ARGON_PASSES ||
+      if (!integerInRange(memorySize, ARGON_MIN_MEMORY_KIB, ARGON_MAX_MEMORY_KIB) ||
+          memorySize % 1024 !== 0 ||
+          !integerInRange(iterations, ARGON_MIN_PASSES, ARGON_MAX_PASSES) ||
           parallelism !== ARGON_PARALLELISM || header[13] !== 0 ||
           header[14] !== 0 || header[15] !== 0) {
         throw new Error("Unsupported Argon2id parameters or header flags.");
@@ -375,7 +536,7 @@
     ARGON2_FAILED: "Argon2id computation failed. Check the browser's WebAssembly support."
   });
 
-  function deriveArgon2Bytes(passwordBytes, salt, fields) {
+  function deriveArgon2Bytes(passwordBytes, salt, fields, signal) {
     return new Promise((resolve, reject) => {
       let worker;
       try {
@@ -385,17 +546,26 @@
         return;
       }
       let completed = false;
+      const abort = () => finish(new Error("Benchmark cancelled."));
       const finish = (error, bytes) => {
         if (completed) return;
         completed = true;
+        if (signal) signal.removeEventListener("abort", abort);
         worker.terminate();
         if (error) reject(error);
         else resolve(bytes);
       };
+      if (signal) {
+        if (signal.aborted) return abort();
+        signal.addEventListener("abort", abort, { once: true });
+      }
       worker.onmessage = (event) => {
         if (event.data && event.data.ok && event.data.key instanceof ArrayBuffer &&
             event.data.key.byteLength === 32) {
-          finish(null, new Uint8Array(event.data.key));
+          finish(null, {
+            bytes: new Uint8Array(event.data.key),
+            durationMs: Number(event.data.durationMs)
+          });
         } else {
           const code = event.data && event.data.code;
           finish(new Error(ARGON2_ERRORS[code] || ARGON2_ERRORS.ARGON2_FAILED));
@@ -425,13 +595,13 @@
     }
     const derived = await deriveArgon2Bytes(passwordBytes, fields.salt, fields);
     try {
-      return await crypto.subtle.importKey("raw", derived, "AES-GCM", false, [usage]);
+      return await crypto.subtle.importKey("raw", derived.bytes, "AES-GCM", false, [usage]);
     } finally {
-      derived.fill(0);
+      derived.bytes.fill(0);
     }
   }
 
-  async function encrypt(plaintext, password, kdfName) {
+  async function encrypt(plaintext, password, settings) {
     const plainBytes = encoder.encode(plaintext);
     let passwordBytes;
     try {
@@ -441,8 +611,9 @@
       }
       const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
       const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
-      const header = kdfName === "argon2id" ? makeV2Header(salt, iv) :
-        kdfName === "pbkdf2" ? makeV1Header(salt, iv) : null;
+      const header = settings.kdfName === "argon2id" ?
+        makeV2Header(salt, iv, settings.memorySize, settings.iterations) :
+        settings.kdfName === "pbkdf2" ? makeV1Header(salt, iv, settings.iterations) : null;
       if (!header) throw new Error("Unknown key derivation method.");
       const fields = parsePackage(new Uint8Array([...header, ...new Uint8Array(TAG_BYTES)]));
       const key = await deriveKey(passwordBytes, fields, "encrypt");
@@ -489,6 +660,73 @@
     }
   }
 
+
+  function applyPreset(name) {
+    const values = ARGON_PRESETS[name];
+    if (!values || busy) return;
+    $("argonMemory").value = values[0];
+    $("argonPasses").value = values[1];
+    invalidateBenchmark();
+    updateGuidance();
+  }
+
+  function invalidateBenchmark() {
+    $("benchmarkStatus").textContent = "Not tested on this device for the selected settings.";
+    $("benchmarkStatus").dataset.kind = "info";
+  }
+
+  async function runBenchmark() {
+    if (busy) return;
+    let settings;
+    try {
+      settings = encryptionSettings();
+    } catch (error) {
+      $("benchmarkStatus").textContent = error.message;
+      $("benchmarkStatus").dataset.kind = "error";
+      return;
+    }
+    if (typeof crypto === "undefined" || !crypto.subtle) {
+      $("benchmarkStatus").textContent = "Web Crypto is unavailable. Open this site over HTTPS.";
+      $("benchmarkStatus").dataset.kind = "error";
+      return;
+    }
+    const isArgon = settings.kdfName === "argon2id";
+    benchmarkAbort = isArgon ? new AbortController() : null;
+    setBusy(true, "benchmark");
+    $("benchmarkStatus").dataset.kind = "info";
+    $("benchmarkStatus").textContent = "Running a real local benchmark…";
+    const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+    const dummyPassword = encoder.encode("CipherLink Lite benchmark — disposable test input");
+    let derived;
+    try {
+      const start = performance.now();
+      let elapsed;
+      if (isArgon) {
+        derived = await deriveArgon2Bytes(dummyPassword, salt, settings, benchmarkAbort.signal);
+        elapsed = performance.now() - start;
+      } else {
+        await derivePbkdf2Key(dummyPassword, salt, settings.iterations, "encrypt");
+        elapsed = performance.now() - start;
+      }
+      const measuredMs = isArgon && Number.isFinite(derived.durationMs) ? derived.durationMs : elapsed;
+      const report = `${settings.kdfName === "argon2id" ? "Argon2id" : "PBKDF2"}: ${Math.round(measuredMs).toLocaleString("en-US")} ms KDF, ` +
+        `${Math.round(elapsed).toLocaleString("en-US")} ms total on this device. ` +
+        (elapsed > 15000 ? "Very slow: consider lower settings. " : elapsed > 5000 ? "Slow: check the target device. " : "") +
+        "This does not guarantee compatibility on other devices.";
+      $("benchmarkStatus").textContent = report;
+      $("benchmarkStatus").dataset.kind = elapsed > 5000 ? "warning" : "success";
+    } catch (error) {
+      $("benchmarkStatus").textContent = error.message || "Benchmark failed.";
+      $("benchmarkStatus").dataset.kind = "error";
+    } finally {
+      if (derived) derived.bytes.fill(0);
+      dummyPassword.fill(0);
+      salt.fill(0);
+      benchmarkAbort = null;
+      setBusy(false, "benchmark");
+    }
+  }
+
   async function copyValue(value, fieldId) {
     if (!value) return;
     try {
@@ -505,11 +743,34 @@
     if (location.hash) history.replaceState(history.state, "", location.pathname + location.search);
   }
 
+  function updateDecryptGuidance() {
+    const guidance = $("decryptAdvice");
+    guidance.textContent = "";
+    guidance.dataset.kind = "info";
+    const input = $("decryptData").value.trim();
+    if (input.length < 50) return;
+    try {
+      const fields = readInput(input);
+      if (fields.kdfId === ARGON2ID_ID) {
+        const memory = fields.memorySize / 1024;
+        guidance.textContent = `Argon2id: ${memory} MiB, ${fields.iterations} passes, parallelism 1. ` +
+          "Decryption requires the original settings on this device." +
+          (memory > 64 || fields.iterations > 6 ? " Warning: This link may be slow or may fail on low-memory devices." : "");
+        guidance.dataset.kind = memory > 64 || fields.iterations > 6 ? "warning" : "info";
+      } else {
+        guidance.textContent = `PBKDF2-SHA256: ${fields.iterations.toLocaleString("en-US")} iterations.`;
+      }
+    } catch {
+      guidance.textContent = "";
+    }
+  }
+
   function loadFragment() {
     const fragment = location.hash;
     if (!fragment || !/(?:^#|&)data=/.test(fragment)) return;
     switchMode("decrypt");
     $("decryptData").value = fragment;
+    updateDecryptGuidance();
     $("decryptResult").hidden = true;
     $("decryptedText").value = "";
     try {
@@ -527,26 +788,28 @@
     const plain = $("plainInput").value;
     const password = $("encryptPassword").value;
     const confirmation = $("confirmPassword").value;
-    const kdfName = $("kdfChoice").value;
+    let settings;
+    try {
+      settings = encryptionSettings();
+    } catch (error) {
+      return notice(error.message, "error");
+    }
     $("encryptPassword").value = "";
     $("confirmPassword").value = "";
     $("encryptResult").hidden = true;
     $("encryptedUrl").value = "";
     $("encryptedData").value = "";
     if (password !== confirmation) return notice("Passwords do not match.", "error");
-    if (!password && !window.confirm("Warning: An empty password provides no meaningful confidentiality. Anyone with the encrypted data can decrypt it using an empty password. Continue?")) {
-      return notice("Encryption cancelled.");
-    }
     if (typeof crypto === "undefined" || !crypto.subtle) {
       return notice("Web Crypto API is unavailable. Open this site over HTTPS.", "error");
     }
     setBusy(true, "encrypt");
-    notice(`Encrypting with ${kdfName === "argon2id" ? "Argon2id" : "PBKDF2"}…`);
+    notice(`Encrypting with ${settings.kdfName === "argon2id" ? "Argon2id" : "PBKDF2"}…`);
     try {
-      const result = await encrypt(plain, password, kdfName);
+      const result = await encrypt(plain, password, settings);
       const url = new URL(location.href);
       url.search = "";
-      url.hash = `v=${result.version}&data=${result.data}`;
+      url.hash = `data=${result.data}`;
       $("encryptedData").value = result.data;
       $("encryptedUrl").value = url.href;
       $("plainInput").value = "";
@@ -592,18 +855,32 @@
     }
   });
 
+  for (const id of ["kdfChoice", "argonMemory", "argonPasses", "pbkdfIterations", "encryptPassword", "confirmPassword"]) {
+    $(id).addEventListener("input", () => {
+      if (["kdfChoice", "argonMemory", "argonPasses", "pbkdfIterations"].includes(id)) invalidateBenchmark();
+      if (id === "argonMemory" || id === "argonPasses") $("argonPreset").value = "custom";
+      updateGuidance();
+    });
+  }
+  $("argonPreset").addEventListener("change", () => applyPreset($("argonPreset").value));
+  $("decryptData").addEventListener("input", updateDecryptGuidance);
+  $("runBenchmark").addEventListener("click", runBenchmark);
+  $("cancelBenchmark").addEventListener("click", () => benchmarkAbort?.abort());
+
   $("encryptTab").addEventListener("click", () => switchMode("encrypt"));
   $("decryptTab").addEventListener("click", () => switchMode("decrypt"));
   $("clearEncrypt").addEventListener("click", () => {
     if (busy) return;
     for (const id of ["plainInput", "encryptPassword", "confirmPassword", "encryptedUrl", "encryptedData"]) $(id).value = "";
     $("encryptResult").hidden = true;
+    updateGuidance();
     notice("");
   });
   $("clearDecrypt").addEventListener("click", () => {
     if (busy) return;
     for (const id of ["decryptData", "decryptPassword", "decryptedText"]) $(id).value = "";
     $("decryptResult").hidden = true;
+    updateDecryptGuidance();
     clearAddressFragment();
     notice("Fields and current address fragment have been cleared.", "success");
   });
@@ -620,6 +897,7 @@
   setTheme(prefersDark.matches);
   $("themeButton").addEventListener("click", () => setTheme(document.documentElement.dataset.theme !== "dark"));
   addEventListener("hashchange", loadFragment);
+  updateGuidance();
   loadFragment();
 })();
 </script>

@@ -1,152 +1,162 @@
 # CipherLink Lite
 
-A lightweight, browser-only text encryption tool that creates password-protected, shareable links. The app runs on GitHub Pages without a backend, database, login, external API, or runtime CDN.
+CipherLink Lite is a lightweight browser-only tool for encrypting and sharing text through URL fragments. The published website is static, has no application backend, and never sends your plaintext or password to an encryption server.
+
+**Security notice:** This project has not undergone an independent security audit. Do not rely on it as your only way to store high-value secrets. A zero-length password is allowed but provides **no meaningful confidentiality**.
 
 ## Features
 
-- AES-256-GCM authenticated encryption using the browser's Web Crypto API.
-- Two password-based key derivation methods:
-  - **Argon2id v1.3 (default):** 32 MiB of memory, 3 passes, parallelism 1, 32-byte key, via a self-hosted WASM bundle.
-  - **PBKDF2-HMAC-SHA256:** 600,000 iterations using native Web Crypto; also decrypts the previous `v=1` links.
-- Select KDF when encrypting. The correct method is automatically detected when decrypting.
-- Fresh random 16-byte salt and 12-byte AES-GCM nonce for every encryption.
-- UTF-8 plaintext and NFC-normalized UTF-8 passwords, including Korean, Japanese, emoji, and combining marks.
-- Share URLs using `#v=1&data=...` or `#v=2&data=...`, without exposing the password in the URL.
-- Base64URL data format, copyable ciphertext, and automatic Decrypt mode on shared links.
-- Responsive UI, light/dark toggle, no third-party fonts or tracking scripts.
-- Empty passwords are allowed. **They provide no meaningful confidentiality** and require an explicit warning acknowledgment when encrypting. For Argon2id v2, an empty UTF-8 password is mapped to the single raw byte `FF` before key derivation because the pinned `hash-wasm@4.12.0` library refuses zero-length input. This is a versioned application convention, not the RFC Argon2id result for an actual empty byte sequence.
-- Size limit: 16 KiB of UTF-8 plaintext. No persistent application storage of plaintext/passwords.
+- **AES-256-GCM** authenticated encryption and decryption through Web Crypto API.
+- **Argon2id v1.3** via self-hosted `hash-wasm@4.12.0` WebAssembly in a dedicated worker.
+- **PBKDF2-HMAC-SHA256** via the browser's Web Crypto API, without a separate KDF library.
+- Adjustable KDF costs, five Argon2id presets, and a real on-device KDF benchmark.
+- KDF cost and password warnings update immediately as you type or change settings; no warning modal dialog.
+- Zero-length passwords supported for both algorithms, with an inline confidentiality warning.
+- Copyable Base64URL ciphertext and shareable `#data=...` URLs; legacy `#v=1&data=...` and `#v=2&data=...` links still work.
+- Automatic algorithm detection and a warning when a pasted Argon2id URL requires high resources.
+- UTF-8 plaintext and NFC-normalized UTF-8 passwords, including CJK text, emojis, and combining marks.
+- Fresh 16-byte salt and 12-byte IV for every encryption; each header is authenticated as AES-GCM additional data.
+- Light/dark UI, no external fonts, no runtime CDN, no browser-storage persistence.
 
-## Source files
+## Default parameters and permitted ranges
+
+| Algorithm | Parameter | Minimum | Default | Maximum |
+|---|---|---:|---:|---:|
+| Argon2id | Memory | 19 MiB | 32 MiB | 256 MiB |
+| Argon2id | Passes | 2 | 6 | 10 |
+| Argon2id | Parallelism | 1 | 1 | 1 |
+| PBKDF2-SHA256 | Iterations | 600,000 | 600,000 | 2,000,000 |
+
+Argon2id presets are **Compatibility** (32 MiB, 3 passes), **Balanced** (32 MiB, 6 passes), **Strong** (64 MiB, 3 passes), **High** (128 MiB, 3 passes), and **Expert** (256 MiB, 6 passes). Selecting other values switches the preset label to **Custom**. The presets are usability labels, not certified security tiers or quantitative equivalence claims.
+
+These are application resource limits, **not validated hardware limits or guarantees of cryptographic security**. Decryption always repeats the selected KDF costs. Some mobile browsers may be unable to decrypt packages created with large memory settings. For maximal portability, benchmark on the least powerful device that must decrypt the data.
+
+Parallelism remains fixed at **1** in this release. Do not increase it until an independent interoperability test verifies the `hash-wasm` implementation, derived-key outputs, memory behavior, and cross-device decryption at `p > 1`.
+
+## Device Benchmark
+
+1. Choose Argon2id or PBKDF2 and set the cost parameters.
+2. Click **Run Benchmark**.
+3. The browser executes the selected KDF using a disposable, nonsecret input and a fresh random salt. No plaintext or user-entered password is sent to the benchmark.
+4. The displayed numbers describe only the current device and browser. **Argon2id** reports approximate time inside the worker's hash call and end-to-end time including worker startup; **PBKDF2** reports end-to-end Web Crypto time.
+5. Argon2id benchmarks can be cancelled with **Cancel**, which terminates the worker. The PBKDF2 operation is not cancellable using the Web Crypto API.
+6. Changing algorithm or parameters invalidates the previous benchmark result. Results are not persisted.
+
+**Decryption requires the same Argon2id memory and iteration settings. High values may prevent decryption on low-memory devices.** A benchmark that succeeds on your PC does not prove it will work on a different PC or smartphone.
+
+## Repository layout
 
 ```text
 cipherlink-lite/
-├── index.html                 # UI and Web Crypto code
-├── argon2-worker.js           # Dedicated Argon2id worker; released after each operation
-├── README.md                  # User and format documentation
-├── .github/workflows/deploy.yml  # GitHub Pages deployment and pinned vendor packaging
-├── tests/verify.cjs           # Node.js cryptographic known-answer and format checks
-└── tests/worker-smoke.cjs     # Worker protocol and error-handling tests
+├── index.html
+├── argon2-worker.js
+├── README.md
+├── .github/workflows/deploy.yml
+└── tests/
+    ├── verify.cjs
+    ├── worker-smoke.cjs
+    └── contract.cjs
 ```
 
-The published site contains `index.html`, `argon2-worker.js`, `vendor/argon2.umd.min.js`, `vendor/LICENSE.hash-wasm`, and `.nojekyll`. Only the two JavaScript-related files and HTML are executable. The WASM implementation is bundled into the vendor JavaScript file.
+The published Pages artifact contains `index.html`, `argon2-worker.js`, `vendor/argon2.umd.min.js`, `vendor/LICENSE.hash-wasm`, and `.nojekyll`. GitHub Actions creates the `vendor/` files at deploy time; browsers do not request a third-party CDN.
 
-## Deploy to GitHub Pages (GitHub Actions)
+## Deploy to GitHub Pages
 
-GitHub Actions is used only at **deployment time** to fetch and bundle an exact, pinned open-source Argon2id implementation. End-user browsers never fetch external CDN resources. No Node.js installation is required on your PC and no build step runs when visitors open the page.
+1. Create a public repository named `cipherlink-lite` or another name you prefer.
+2. Upload the entire repository **without changing its folder structure**.
+3. In **Settings → Pages → Build and deployment**, select **GitHub Actions**, not *Deploy from a branch*.
+4. Commit/push to the `main` branch, or run **Actions → Deploy CipherLink Lite → Run workflow** manually.
+5. Confirm the workflow succeeds. It retrieves the pinned `hash-wasm@4.12.0` release, runs the tests, and deploys the static artifact.
+6. Test `https://USERNAME.github.io/cipherlink-lite/` and `https://USERNAME.github.io/cipherlink-lite/vendor/argon2.umd.min.js` (replace `USERNAME` with your account name).
+7. In a fresh browser tab, verify both algorithms, empty and non-empty passwords, and compatibility with older links.
 
-1. Create a GitHub repository called `cipherlink-lite`.
-2. Upload all source files, **preserving the `.github/workflows/deploy.yml` and `tests/verify.cjs` paths**.
-3. Go to **Settings → Pages → Build and deployment**, and select **GitHub Actions** (not *Deploy from a branch*).
-4. Push the files to the `main` branch. The workflow can also be launched from **Actions → Deploy CipherLink Lite → Run workflow**.
-5. Confirm the GitHub Actions workflow is green; if a test fails, the new version will not deploy. Verify `https://USERNAME.github.io/cipherlink-lite/`.
-6. Choose Argon2id or PBKDF2 in the Encrypt tab. A shared URL automatically selects Decrypt and detects the key derivation method without user intervention.
+Changing the Pages deployment source alone does not deploy updated source files. If this release replaces the files in an existing repository, commit the modified files and verify the subsequent Actions run.
 
-If you prefer **Deploy from a branch** without GitHub Actions, you must manually place the exact version `4.12.0` of `hash-wasm/dist/argon2.umd.min.js` under `vendor/argon2.umd.min.js` and its license under `vendor/LICENSE.hash-wasm` in the repository. Official package: <https://www.npmjs.com/package/hash-wasm/v/4.12.0>. The downloaded package is used locally; there is no runtime CDN. The main HTML and worker are still build-free.
+### Local development
 
-### Dependency pinning and licensing
+The `index.html` file can be edited directly. Argon2id requires a correctly deployed `vendor/argon2.umd.min.js` under the same origin. For local HTTP testing use a localhost server (or GitHub Pages); browser policies often disallow workers loaded from `file://`.
 
-The deploy workflow obtains `hash-wasm@4.12.0` using `npm pack`, then extracts only `package/dist/argon2.umd.min.js` and `package/LICENSE`. This project uses `hash-wasm`'s standalone Argon2 bundle (MIT license). Upgrading the pinned version must be treated as a controlled security-sensitive change. The included known-answer tests and Worker smoke tests check the KDF result, authenticated encryption behavior, and Worker protocol before GitHub Pages deployment, but are not a substitute for a comprehensive security audit or independent supply-chain verification.
+The inline application JavaScript is protected by a **SHA-256 CSP hash**. When changing the contents of the `<script>` element, recompute its CSP hash before deployment. The workflow's verification test rejects stale hashes.
 
+```bash
+node -e "const fs=require('fs'),c=require('crypto');const p='index.html';let s=fs.readFileSync(p,'utf8');const m=s.match(/<script>([\s\S]*?)<\/script>/);if(!m)throw Error('Inline script missing');const h=c.createHash('sha256').update(m[1]).digest('base64');s=s.replace(/script-src 'sha256-[^']+'/,\"script-src 'sha256-\"+h+\"'\");fs.writeFileSync(p,s);"
+```
 
-## Troubleshooting Argon2id
+## Encrypted data formats and backward compatibility
 
-If encryption displays an Argon2id error, check the exact message before changing memory settings.
+### PBKDF2 v1
 
-1. Verify **Settings → Pages → Build and deployment → Source** is **GitHub Actions**. The source ZIP intentionally does not contain the third-party vendor bundle; the workflow adds it to the published artifact.
-2. Open `https://USERNAME.github.io/cipherlink-lite/vendor/argon2.umd.min.js` (replace USERNAME). It must return JavaScript, not 404 or the HTML of an error page. Also check `.../argon2-worker.js`.
-3. In **Actions → Deploy CipherLink Lite**, check that the latest workflow succeeded. The original v2 verification test incorrectly called `hash-wasm` with an empty password, which the library rejects; this release fixes that test and the browser Worker.
-4. For failures on a deployed site, use the browser's DevTools Network tab and Console to check whether the local vendor file was blocked or failed to load. Do **not** paste passwords or decrypted content into issue reports.
-5. If the vendor file exists and Argon2id still fails, test a non-empty password and try a current desktop browser. The Worker now distinguishes library load errors, missing API, resource allocation problems, and other calculation failures.
-
-The browser does not automatically fall back from Argon2id to PBKDF2. Each ciphertext carries its own KDF identifier and must be decrypted using that KDF.
-
-## Wire format: PBKDF2 v1 (backward-compatible)
-
-URL: `#v=1&data=BASE64URL`
-
-| Byte offset | Length | Content |
+| Offset | Length | Meaning |
 |---|---:|---|
-| 0–1 | 2 | ASCII `SC` = `53 43` hexadecimal |
+| 0–1 | 2 | ASCII `SC` (`53 43`) |
 | 2 | 1 | Format version `01` |
 | 3 | 1 | KDF ID `01` (PBKDF2-HMAC-SHA256) |
 | 4–7 | 4 | Iterations, unsigned 32-bit big-endian |
 | 8–23 | 16 | Random salt |
 | 24–35 | 12 | Random AES-GCM IV |
-| 36 onward | variable | Ciphertext followed by 16-byte GCM authentication tag |
+| 36 onward | variable | AES-GCM ciphertext followed by the 16-byte tag |
 
-The app encrypts using 600,000 iterations, and accepts iteration counts from 600,000 to 2,000,000 for compatible v1 decryption. Version 1 is unchanged from the previous release. Overhead is 52 bytes plus Base64URL expansion.
+An older v1 package with 600,000 iterations remains valid. The range is 600,000–2,000,000.
 
-## Wire format: Argon2id v2
+### Argon2id v2
 
-URL: `#v=2&data=BASE64URL`
-
-| Byte offset | Length | Content |
+| Offset | Length | Meaning |
 |---|---:|---|
-| 0–1 | 2 | ASCII `SC` = `53 43` hexadecimal |
+| 0–1 | 2 | ASCII `SC` (`53 43`) |
 | 2 | 1 | Format version `02` |
-| 3 | 1 | KDF ID `02` (Argon2id version 1.3 / 0x13) |
-| 4–7 | 4 | Memory cost in KiB; unsigned 32-bit big-endian; **32768** |
-| 8–11 | 4 | Passes; unsigned 32-bit big-endian; **3** |
-| 12 | 1 | Parallelism, **1** |
-| 13–15 | 3 | Reserved flags, all zeros |
+| 3 | 1 | KDF ID `02` (Argon2id v1.3) |
+| 4–7 | 4 | Memory cost in KiB, unsigned 32-bit big-endian |
+| 8–11 | 4 | Pass count, unsigned 32-bit big-endian |
+| 12 | 1 | Parallelism (currently `01`) |
+| 13–15 | 3 | Reserved bytes, all zero |
 | 16–31 | 16 | Random salt |
 | 32–43 | 12 | Random AES-GCM IV |
-| 44 onward | variable | Ciphertext followed by 16-byte GCM authentication tag |
+| 44 onward | variable | AES-GCM ciphertext followed by the 16-byte tag |
 
-**Argon2id v2 empty-password convention:** after NFC normalization and UTF-8 encoding, if and only if the password has zero bytes, pass a one-byte array `FF` into Argon2id. All non-empty UTF-8 passwords remain unchanged. Because the byte `FF` is invalid UTF-8, no non-empty browser password can collide with this sentinel. Third-party clients must replicate this rule to decrypt v2 empty-password links. In particular, applying Argon2id directly to the empty byte string will not reproduce such keys. Empty passwords still offer no meaningful confidentiality.
+The binary layout **has not changed**. Older 32 MiB / 3-pass packages and new variable-cost packages use the same v2 layout. The 44-byte header is authenticated as AES-GCM additional data. All parameter limits are validated **before** starting KDF work; this reduces, but cannot eliminate, denial-of-service risk from hostile URLs.
 
-The total v2 overhead is 60 bytes. For v2, the parser accepts only the exact resource parameters listed above. Future settings should use a new format version rather than altering the published v2 contract. This protects the browser from arbitrary KDF resource costs in attacker-controlled links.
+**Empty-password convention:** the pinned `hash-wasm@4.12.0` implementation rejects a zero-byte password. For Argon2id v2 only, when the NFC-normalized UTF-8 password is empty, it is mapped to the one-byte sentinel `FF` before calling Argon2id. This mapping is preserved for compatibility. No nonempty UTF-8 password can produce the invalid standalone byte `FF`. Third-party decryptors must implement the same rule. PBKDF2 uses actual empty password bytes.
 
-Both formats use UTF-8 plaintext without normalization; the password is normalized to NFC before UTF-8 encoding, including when empty. AES-GCM uses the **entire binary header as authenticated additional data (AAD)** and a 128-bit tag. Base64URL omits `=` padding and must be canonical. A URL's outer `v=` must match the embedded package version. The key derivation returns a 32-byte AES key; it is never embedded in the URL.
+All new URLs use `#data=BASE64URL`, without an external version prefix. The binary package still contains the format version and KDF ID. Legacy `#v=1&data=...` and `#v=2&data=...` formats are recognized and checked against the inner version. Omitting the visible version does **not** hide the algorithm or provide additional secrecy.
 
-## Security boundaries
+## Security considerations
 
-- **Base64URL is an encoding, not encryption.** AES-256-GCM authenticates and encrypts data; the KDF slows offline password guessing but does not replace a strong password.
-- Empty, weak, or predictable passwords allow attackers with the encrypted URL to recover the plaintext. Argon2id does **not** make an empty password secret.
-- URL fragments are ordinarily excluded from HTTP requests and `Referer`, but may appear in browser history, extensions, clipboard, screenshots, sync, and messaging systems.
-- The HTML and local Argon2 vendor code can access sensitive data while running. Compromised GitHub Pages content, a compromised repository account, or a malicious update can steal plaintext/passwords.
-- No app code intentionally writes passwords or plaintext to URLs, logs, localStorage, sessionStorage, cookies, or IndexedDB. Browser memory and historical clipboard contents cannot be reliably erased.
-- GitHub Pages projects on the same hostname share an origin. Consider a dedicated origin if unrelated scripts are hosted on the same `USERNAME.github.io` hostname.
-- The app uses an in-page CSP that permits same-origin scripts, the hashed inline app script, WebAssembly, and same-origin Web Workers. HTML meta CSP cannot set all HTTP-header-only policies.
-- A new Argon2id Worker is created for each operation, and terminated after its answer to release references and reduce persistent WASM memory. This does not guarantee complete memory erasure.
-- Keep shared links and passwords on separate communication channels where practical. Avoid relying on the URL as your only backup: preserve a known-good copy of the decryption application and the format specification.
+- The AES key is derived in the browser, not on GitHub Pages. Runtime memory usage and CPU costs are paid by the user device, not GitHub Pages.
+- An attacker who knows the ciphertext can attempt offline password guessing, regardless of the selected KDF. **An empty or easily guessed password defeats meaningful confidentiality.**
+- Strong passwords and a carefully selected KDF cost are complementary. Larger numbers do not automatically guarantee safety.
+- Ciphertexts in URL fragments are not normally sent in HTTP requests, but browser history, clipboard history, extensions, messages, and script running in the page can access them.
+- The publisher of the GitHub Pages application can change the JavaScript. Review updates and protect repository permissions and the GitHub account.
+- Applications sharing the same origin are not isolated merely because their URL paths differ. Consider a dedicated domain for high-value use.
+- HTML-looking decrypted content is displayed as text, not interpreted as markup.
+- Application code does not log or persist passwords or plaintext, but browsers cannot guarantee complete erasure of secrets from memory.
+- Only one KDF job can run in the UI at a time. An Argon2id benchmark is cancelable, but a user-provided URL within supported resource bounds can still be intentionally expensive.
+- This is an unaudited application and should not be treated as a replacement for professionally audited password managers.
 
-## Manual testing checklist
+## Tests
 
-| ID | Test | Expected outcome |
-|---|---|---|
-| T01 | Argon2id with English text and nonempty password | Round-trip success, URL `v=2` |
-| T02 | PBKDF2 with English text and nonempty password | Round-trip success, URL `v=1` |
-| T03 | Use a previously created PBKDF2 v1 link | Still decrypts without changes |
-| T04 | Korean, Japanese, emoji, composed and decomposed characters | Plaintext round-trips exactly |
-| T05 | Empty password with Argon2id and PBKDF2 | Warning shown; confirmation permits encryption and empty-password decryption succeeds |
-| T06 | Cancel empty-password warning | No encrypted result generated |
-| T07 | Incorrect password for either format | Authenticated decryption fails |
-| T08 | Tamper with GCM tag or header | Authentication or format validation fails |
-| T09 | Modify v2 memory, passes, parallelism, flags | Rejected before starting worker |
-| T10 | Change URL version to disagree with encrypted binary | Mismatch error |
-| T11 | Identical plaintext/password encrypted twice | Different salts, nonces, and ciphertext |
-| T12 | Open `#v=1&data=...`, `#v=2&data=...`, or `#data=...` | Automatic Decrypt mode and correct KDF detection |
-| T13 | Paste only Base64URL ciphertext | Detected and decrypted using embedded header |
-| T14 | Encrypt more than 16 KiB UTF-8 | Rejected |
-| T15 | Remove bundled vendor JS from deployed site | PBKDF2 works; Argon2id reports an error and does not silently downgrade |
-| T16 | Toggle themes / test on narrow mobile width | Functional layout; no localStorage writes |
-| T17 | Inspect browser network after opening a deployed site | No API or external CDN requests |
-| T18 | Open page with incorrect script hash | CSP blocks inline script; update hash before deployment |
-| T19 | Remove `vendor/argon2.umd.min.js` | Explicit vendor load error; no automatic fallback |
-| T20 | Use an empty password with Argon2id v2 | The reserved `FF` sentinel is used; the same link decrypts with an empty password |
-| T19 | Copy encrypted URL, open in another device | Correct plaintext with same password and compatible browser |
-| T20 | Add `<script>` markup to plaintext | Result remains inert text, not executable markup |
+GitHub Actions runs these checks **before deployment**:
 
-The GitHub Actions workflow also runs `tests/verify.cjs`, which validates a fixed Argon2id v1.3 KDF result, a PBKDF2-SHA256 result, both AES-GCM header layouts, Unicode round trips, authenticated-header tampering, and the inline CSP hash. This does **not** substitute for testing the actual deployed browser Worker and CSP behavior in Chrome, Edge, Firefox, Android Chrome, and Safari.
+- `node tests/verify.cjs`: CSP SHA-256, Argon2id known-answer test vectors (legacy and new default), PBKDF2, Unicode and AES-GCM authenticated-header checks using the deployed pinned WASM bundle.
+- `node tests/worker-smoke.cjs`: Worker validation for minimum, default, maximum, legacy parameters, empty-password mapping, invalid parameters, and missing-vendor error reporting using a test double.
+- `node tests/contract.cjs`: UI logic using a simulated DOM, inline warnings, presets, bounds, share-link forms, Unicode and empty-password round trips with native PBKDF2 and a **mocked Argon2id Worker**, and benchmark UI state.
 
-### Updating inline JavaScript
+**Important:** A mocked Worker test is not an actual browser WASM integration test. The GitHub Actions tests cover the real `hash-wasm` algorithm via Node, but the complete deployed browser Worker and device-specific performance must still be tested manually.
 
-The inline application JavaScript uses a SHA-256 CSP hash. **If you edit the `<script>` contents, recalculate the hash in `index.html`.** Use this Node.js snippet on your development machine:
+Recommended manual tests after deployment:
 
-```bash
-node -e "const fs=require('fs'),crypto=require('crypto');const p='index.html';let s=fs.readFileSync(p,'utf8');const m=s.match(/<script>([\s\S]*?)<\/script>/);if(!m)throw Error('script not found');const h=crypto.createHash('sha256').update(m[1]).digest('base64');s=s.replace(/script-src 'sha256-[^']+'/,\"script-src 'sha256-\"+h+\"'\");fs.writeFileSync(p,s);"
-```
+| Test | Expected result |
+|---|---|
+| Open a legacy v1 URL | PBKDF2 decrypts |
+| Open a legacy 32 MiB / 3-pass v2 URL | Argon2id decrypts |
+| Encrypt with Balanced and decrypt on a different device | Round-trip succeeds |
+| Set 19 MiB / 2 passes and 256 MiB / 10 passes | Parameter validation accepts both; high-cost tests are optional |
+| Enter an empty password | Inline warning appears; no modal dialog |
+| Enter mismatched passwords | Inline error appears |
+| Select an expensive profile | Immediate device-resource warning appears |
+| Paste an expensive ciphertext URL | The decryption form shows its parameters and warning |
+| Run Benchmark and cancel Argon2id | Worker is stopped and page remains responsive |
+| Change settings after benchmark | Previous benchmark result is invalidated |
+| Corrupt ciphertext or header | AES-GCM authentication fails or the format is rejected |
+| Inspect Network | No external API/CDN calls, only same-origin assets |
 
-No persistent browser storage, build tool, or external service is required **at runtime**. The default deployment requires GitHub Actions only to package a pinned self-hosted Argon2id dependency and validate crypto test vectors.
+Do not commit private test passwords or real plaintext. Keep test vectors public and nonsecret.
