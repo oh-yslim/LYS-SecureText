@@ -1,0 +1,54 @@
+name: Deploy CipherLink Lite
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare static website and pinned Argon2id dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site/vendor
+          cp index.html argon2-worker.js site/
+          printf '' > site/.nojekyll
+          npm pack hash-wasm@4.12.0 --pack-destination "$RUNNER_TEMP" --silent
+          tar -xOzf "$RUNNER_TEMP/hash-wasm-4.12.0.tgz" package/dist/argon2.umd.min.js > site/vendor/argon2.umd.min.js
+          tar -xOzf "$RUNNER_TEMP/hash-wasm-4.12.0.tgz" package/LICENSE > site/vendor/LICENSE.hash-wasm
+          test -s site/vendor/argon2.umd.min.js
+
+      - name: Verify cryptography and data formats
+        run: |
+          node tests/verify.cjs
+          node tests/worker-smoke.cjs
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

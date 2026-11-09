@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="light dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5AdtT5hZi6fflT+37+K0OZUfay41Abcb+9Xuvh+BXuE='; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Secure Text · Browser-only encryption</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-qapd7g5Joeuf1McY8sX3s6H3+f2L5g6nUdVxN7ABpcc=' 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>CipherLink Lite · Browser-only encryption</title>
   <style>
     :root { color-scheme: light; --bg:#f6f8fc; --panel:#fff; --ink:#172238; --muted:#64748b; --line:#dbe2eb; --accent:#1661d8; --soft:#eff5ff; --danger:#b42318; --shadow:0 16px 48px rgba(18,38,74,.07); }
     :root[data-theme="dark"] { color-scheme: dark; --bg:#0e1420; --panel:#172131; --ink:#eef3fd; --muted:#a5b3c8; --line:#334259; --accent:#7eafff; --soft:#202f46; --danger:#ff9890; --shadow:none; }
@@ -33,9 +33,9 @@
     .theme { white-space:nowrap; font-size:13px; padding:8px 10px; }
     label { display:block; font-size:14px; font-weight:650; margin:0 0 6px; }
     .field { margin-bottom:15px; }
-    textarea,input { display:block; width:100%; min-width:0; border:1px solid var(--line); border-radius:9px; background:var(--panel); color:var(--ink); padding:11px 12px; font:14px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    textarea,input,select { display:block; width:100%; min-width:0; border:1px solid var(--line); border-radius:9px; background:var(--panel); color:var(--ink); padding:11px 12px; font:14px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; }
     textarea { resize:vertical; min-height:100px; overflow-wrap:anywhere; }
-    input { min-height:43px; }
+    input,select { min-height:43px; }
     .passwords { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:17px; }
     .primary { background:var(--accent); border-color:var(--accent); color:var(--bg); font-weight:700; }
@@ -55,8 +55,8 @@
 <main>
   <header>
     <div>
-      <h1>🔒 Secure Text</h1>
-      <p class="subtitle">Encrypt locally · No server-side storage</p>
+      <h1>🔒 CipherLink Lite</h1>
+      <p class="subtitle">Password-based encryption · Entirely in your browser</p>
     </div>
     <button id="themeButton" class="theme" type="button" aria-label="Change theme">Change theme</button>
   </header>
@@ -73,6 +73,14 @@
           <label for="plainInput">Plaintext</label>
           <textarea id="plainInput" rows="5" placeholder="Enter text to encrypt" spellcheck="false" required></textarea>
           <p class="hint">Maximum 16 KiB (UTF-8).</p>
+        </div>
+        <div class="field">
+          <label for="kdfChoice">Key derivation method</label>
+          <select id="kdfChoice" name="kdf">
+            <option value="argon2id" selected>Argon2id (recommended · 32 MiB, 3 passes)</option>
+            <option value="pbkdf2">PBKDF2-SHA256 (compatible · 600,000 iterations)</option>
+          </select>
+          <p class="hint">Argon2id uses a locally hosted WebAssembly component. Decryption detects the method automatically.</p>
         </div>
         <div class="passwords">
           <div class="field">
@@ -130,7 +138,7 @@
 
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </div>
-  <footer>Web Crypto API · AES-256-GCM · PBKDF2-SHA256 (600,000 iterations). Share passwords separately from URLs.</footer>
+  <footer>Web Crypto API · AES-256-GCM · PBKDF2 / Argon2id. The encrypted link never contains your password. Share passwords separately.</footer>
 </main>
 <script>
 (() => {
@@ -138,17 +146,23 @@
 
   const MAGIC_0 = 0x53;
   const MAGIC_1 = 0x43;
-  const VERSION = 1;
-  const KDF_PBKDF2_SHA256 = 1;
-  const ITERATIONS = 600000;
-  const MAX_ITERATIONS = 2000000;
+  const V1 = 1;
+  const V2 = 2;
+  const PBKDF2_ID = 1;
+  const ARGON2ID_ID = 2;
+  const PBKDF2_ITERATIONS = 600000;
+  const MAX_PBKDF2_ITERATIONS = 2000000;
+  const ARGON_MEMORY_KIB = 32768;
+  const ARGON_PASSES = 3;
+  const ARGON_PARALLELISM = 1;
   const SALT_BYTES = 16;
   const IV_BYTES = 12;
-  const HEADER_BYTES = 36;
+  const V1_HEADER_BYTES = 36;
+  const V2_HEADER_BYTES = 44;
   const TAG_BYTES = 16;
   const MAX_PLAINTEXT_BYTES = 16 * 1024;
   const MAX_PASSWORD_BYTES = 2048;
-  const MAX_PACKAGE_BYTES = HEADER_BYTES + MAX_PLAINTEXT_BYTES + TAG_BYTES;
+  const MAX_PACKAGE_BYTES = V2_HEADER_BYTES + MAX_PLAINTEXT_BYTES + TAG_BYTES;
   const encoder = new TextEncoder();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const $ = (id) => document.getElementById(id);
@@ -175,41 +189,93 @@
     $("decryptButton").disabled = value;
     $("encryptTab").disabled = value;
     $("decryptTab").disabled = value;
+    $("kdfChoice").disabled = value;
     $(mode === "encrypt" ? "encryptButton" : "decryptButton").textContent = value
       ? "Working…" : mode === "encrypt" ? "Encrypt" : "Decrypt";
   }
 
-  function makeHeader(salt, iv) {
-    const header = new Uint8Array(HEADER_BYTES);
+  function makeV1Header(salt, iv) {
+    const header = new Uint8Array(V1_HEADER_BYTES);
     header[0] = MAGIC_0;
     header[1] = MAGIC_1;
-    header[2] = VERSION;
-    header[3] = KDF_PBKDF2_SHA256;
-    new DataView(header.buffer).setUint32(4, ITERATIONS, false);
+    header[2] = V1;
+    header[3] = PBKDF2_ID;
+    new DataView(header.buffer).setUint32(4, PBKDF2_ITERATIONS, false);
     header.set(salt, 8);
     header.set(iv, 24);
     return header;
   }
 
-  function parsePackage(packageBytes) {
-    if (packageBytes.length < HEADER_BYTES + TAG_BYTES || packageBytes.length > MAX_PACKAGE_BYTES) {
-      throw new Error("Encrypted data has an invalid length or exceeds the allowed size.");
+  function makeV2Header(salt, iv) {
+    const header = new Uint8Array(V2_HEADER_BYTES);
+    const view = new DataView(header.buffer);
+    header[0] = MAGIC_0;
+    header[1] = MAGIC_1;
+    header[2] = V2;
+    header[3] = ARGON2ID_ID;
+    view.setUint32(4, ARGON_MEMORY_KIB, false);
+    view.setUint32(8, ARGON_PASSES, false);
+    header[12] = ARGON_PARALLELISM;
+    header.set(salt, 16);
+    header.set(iv, 32);
+    return header;
+  }
+
+  function parsePackage(bytes) {
+    if (bytes.length < V1_HEADER_BYTES + TAG_BYTES || bytes.length > MAX_PACKAGE_BYTES) {
+      throw new Error("Encrypted data has an invalid length or exceeds the limit.");
     }
-    const header = packageBytes.slice(0, HEADER_BYTES);
-    if (header[0] !== MAGIC_0 || header[1] !== MAGIC_1 || header[2] !== VERSION || header[3] !== KDF_PBKDF2_SHA256) {
-      throw new Error("Unsupported encrypted data format or version.");
+    if (bytes[0] !== MAGIC_0 || bytes[1] !== MAGIC_1) {
+      throw new Error("Unknown encrypted data format.");
     }
-    const iterations = new DataView(header.buffer).getUint32(4, false);
-    if (iterations < ITERATIONS || iterations > MAX_ITERATIONS) {
-      throw new Error("Key derivation iteration count is outside the permitted range.");
+    const version = bytes[2];
+    const kdfId = bytes[3];
+    if (version === V1 && kdfId === PBKDF2_ID) {
+      if (bytes.length > V1_HEADER_BYTES + MAX_PLAINTEXT_BYTES + TAG_BYTES) {
+        throw new Error("PBKDF2 package exceeds the allowed size.");
+      }
+      const header = bytes.slice(0, V1_HEADER_BYTES);
+      const iterations = new DataView(header.buffer).getUint32(4, false);
+      if (iterations < PBKDF2_ITERATIONS || iterations > MAX_PBKDF2_ITERATIONS) {
+        throw new Error("PBKDF2 iteration count is outside the permitted range.");
+      }
+      return {
+        version,
+        kdfId,
+        iterations,
+        salt: header.slice(8, 24),
+        iv: header.slice(24, 36),
+        header,
+        ciphertext: bytes.slice(V1_HEADER_BYTES)
+      };
     }
-    return {
-      header,
-      iterations,
-      salt: header.slice(8, 8 + SALT_BYTES),
-      iv: header.slice(24, 24 + IV_BYTES),
-      ciphertext: packageBytes.slice(HEADER_BYTES)
-    };
+    if (version === V2 && kdfId === ARGON2ID_ID) {
+      if (bytes.length < V2_HEADER_BYTES + TAG_BYTES) {
+        throw new Error("Argon2id package is incomplete.");
+      }
+      const header = bytes.slice(0, V2_HEADER_BYTES);
+      const view = new DataView(header.buffer);
+      const memorySize = view.getUint32(4, false);
+      const iterations = view.getUint32(8, false);
+      const parallelism = header[12];
+      if (memorySize !== ARGON_MEMORY_KIB || iterations !== ARGON_PASSES ||
+          parallelism !== ARGON_PARALLELISM || header[13] !== 0 ||
+          header[14] !== 0 || header[15] !== 0) {
+        throw new Error("Unsupported Argon2id parameters or header flags.");
+      }
+      return {
+        version,
+        kdfId,
+        memorySize,
+        iterations,
+        parallelism,
+        salt: header.slice(16, 32),
+        iv: header.slice(32, 44),
+        header,
+        ciphertext: bytes.slice(V2_HEADER_BYTES)
+      };
+    }
+    throw new Error("Unsupported encryption version or KDF identifier.");
   }
 
   function toBase64Url(bytes) {
@@ -221,12 +287,14 @@
   }
 
   function fromBase64Url(text) {
-    if (!/^[A-Za-z0-9_-]+$/.test(text) || text.length % 4 === 1 || text.length > Math.ceil(MAX_PACKAGE_BYTES * 4 / 3)) {
-      throw new Error("Invalid Base64URL data or data exceeds the size limit.");
+    if (!/^[A-Za-z0-9_-]+$/.test(text) || text.length % 4 === 1 ||
+        text.length > Math.ceil(MAX_PACKAGE_BYTES * 4 / 3)) {
+      throw new Error("Invalid Base64URL or data exceeds the size limit.");
     }
     let binary;
     try {
-      binary = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - text.length % 4) % 4));
+      binary = atob(text.replace(/-/g, "+").replace(/_/g, "/") +
+        "=".repeat((4 - text.length % 4) % 4));
     } catch {
       throw new Error("Base64URL decoding failed.");
     }
@@ -239,6 +307,7 @@
 
   function extractData(input) {
     let value = input.trim();
+    let declaredVersion = null;
     if (!value) throw new Error("Enter encrypted data.");
     if (/^https?:\/\//i.test(value)) {
       try {
@@ -255,12 +324,24 @@
           [...params.keys()].some((key) => key !== "v" && key !== "data")) {
         throw new Error("Invalid URL fragment structure.");
       }
-      if ((params.get("v") ?? "1") !== String(VERSION)) {
-        throw new Error("Unsupported URL version.");
+      if (params.has("v")) {
+        declaredVersion = Number(params.get("v"));
+        if (!/^[12]$/.test(params.get("v"))) {
+          throw new Error("Unsupported URL version.");
+        }
       }
       value = params.get("data");
     }
-    return value;
+    return { data: value, declaredVersion };
+  }
+
+  function readInput(input) {
+    const { data, declaredVersion } = extractData(input);
+    const fields = parsePackage(fromBase64Url(data));
+    if (declaredVersion !== null && declaredVersion !== fields.version) {
+      throw new Error("URL version and encrypted package version do not match.");
+    }
+    return fields;
   }
 
   function getPasswordBytes(password) {
@@ -272,8 +353,10 @@
     return bytes;
   }
 
-  async function deriveAesKey(passwordBytes, salt, iterations, usage) {
-    const material = await crypto.subtle.importKey("raw", passwordBytes, "PBKDF2", false, ["deriveKey"]);
+  async function derivePbkdf2Key(passwordBytes, salt, iterations, usage) {
+    const material = await crypto.subtle.importKey(
+      "raw", passwordBytes, "PBKDF2", false, ["deriveKey"]
+    );
     return crypto.subtle.deriveKey(
       { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
       material,
@@ -283,40 +366,112 @@
     );
   }
 
-  async function encrypt(plainText, password) {
-    const plainBytes = encoder.encode(plainText);
+  const ARGON2_ERRORS = Object.freeze({
+    INVALID_PARAMETERS: "Argon2id parameters are invalid.",
+    VENDOR_LOAD_FAILED: "Argon2id library could not be loaded. Check that vendor/argon2.umd.min.js is deployed and that GitHub Pages uses GitHub Actions.",
+    VENDOR_INVALID: "The deployed Argon2id library is missing its expected API.",
+    MEMORY_ALLOCATION_FAILED: "Argon2id could not allocate the required memory on this device.",
+    INVALID_KEY: "The Argon2id library returned an invalid key.",
+    ARGON2_FAILED: "Argon2id computation failed. Check the browser's WebAssembly support."
+  });
+
+  function deriveArgon2Bytes(passwordBytes, salt, fields) {
+    return new Promise((resolve, reject) => {
+      let worker;
+      try {
+        worker = new Worker(new URL("argon2-worker.js", document.baseURI));
+      } catch {
+        reject(new Error("Argon2id worker could not start. Check argon2-worker.js and the browser's Content Security Policy."));
+        return;
+      }
+      let completed = false;
+      const finish = (error, bytes) => {
+        if (completed) return;
+        completed = true;
+        worker.terminate();
+        if (error) reject(error);
+        else resolve(bytes);
+      };
+      worker.onmessage = (event) => {
+        if (event.data && event.data.ok && event.data.key instanceof ArrayBuffer &&
+            event.data.key.byteLength === 32) {
+          finish(null, new Uint8Array(event.data.key));
+        } else {
+          const code = event.data && event.data.code;
+          finish(new Error(ARGON2_ERRORS[code] || ARGON2_ERRORS.ARGON2_FAILED));
+        }
+      };
+      worker.onerror = () => finish(new Error("Argon2id worker script could not execute. Check argon2-worker.js in the deployed site."));
+      worker.onmessageerror = () => finish(new Error("Argon2id worker returned an invalid message."));
+      try {
+        const passwordCopy = passwordBytes.slice();
+        const saltCopy = salt.slice();
+        worker.postMessage({
+          password: passwordCopy.buffer,
+          salt: saltCopy.buffer,
+          memorySize: fields.memorySize,
+          iterations: fields.iterations,
+          parallelism: fields.parallelism
+        }, [passwordCopy.buffer, saltCopy.buffer]);
+      } catch {
+        finish(new Error("Unable to start Argon2id key derivation."));
+      }
+    });
+  }
+
+  async function deriveKey(passwordBytes, fields, usage) {
+    if (fields.kdfId === PBKDF2_ID) {
+      return derivePbkdf2Key(passwordBytes, fields.salt, fields.iterations, usage);
+    }
+    const derived = await deriveArgon2Bytes(passwordBytes, fields.salt, fields);
+    try {
+      return await crypto.subtle.importKey("raw", derived, "AES-GCM", false, [usage]);
+    } finally {
+      derived.fill(0);
+    }
+  }
+
+  async function encrypt(plaintext, password, kdfName) {
+    const plainBytes = encoder.encode(plaintext);
     let passwordBytes;
     try {
       passwordBytes = getPasswordBytes(password);
-      if (plainBytes.length > MAX_PLAINTEXT_BYTES) throw new Error("Plaintext must not exceed 16 KiB when encoded as UTF-8.");
+      if (plainBytes.length > MAX_PLAINTEXT_BYTES) {
+        throw new Error("Plaintext must not exceed 16 KiB (UTF-8).");
+      }
       const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
       const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
-      const header = makeHeader(salt, iv);
-      const key = await deriveAesKey(passwordBytes, salt, ITERATIONS, "encrypt");
+      const header = kdfName === "argon2id" ? makeV2Header(salt, iv) :
+        kdfName === "pbkdf2" ? makeV1Header(salt, iv) : null;
+      if (!header) throw new Error("Unknown key derivation method.");
+      const fields = parsePackage(new Uint8Array([...header, ...new Uint8Array(TAG_BYTES)]));
+      const key = await deriveKey(passwordBytes, fields, "encrypt");
       const sealed = new Uint8Array(await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv, additionalData: header, tagLength: 128 }, key, plainBytes
+        { name: "AES-GCM", iv, additionalData: header, tagLength: 128 },
+        key,
+        plainBytes
       ));
-      const packed = new Uint8Array(header.length + sealed.length);
-      packed.set(header);
-      packed.set(sealed, header.length);
-      return toBase64Url(packed);
+      const packageBytes = new Uint8Array(header.length + sealed.length);
+      packageBytes.set(header);
+      packageBytes.set(sealed, header.length);
+      return { version: fields.version, data: toBase64Url(packageBytes) };
     } finally {
       plainBytes.fill(0);
       if (passwordBytes) passwordBytes.fill(0);
     }
   }
 
-  async function decrypt(data, password) {
-    const packed = fromBase64Url(extractData(data));
-    const fields = parsePackage(packed);
+  async function decrypt(input, password) {
+    const fields = readInput(input);
     const passwordBytes = getPasswordBytes(password);
     try {
-      const key = await deriveAesKey(passwordBytes, fields.salt, fields.iterations, "decrypt");
+      const key = await deriveKey(passwordBytes, fields, "decrypt");
       let raw;
       try {
         raw = await crypto.subtle.decrypt(
           { name: "AES-GCM", iv: fields.iv, additionalData: fields.header, tagLength: 128 },
-          key, fields.ciphertext
+          key,
+          fields.ciphertext
         );
       } catch {
         throw new Error("Incorrect password or corrupted encrypted data.");
@@ -325,7 +480,7 @@
       try {
         return decoder.decode(plainBytes);
       } catch {
-        throw new Error("Decrypted data is not valid UTF-8 text.");
+        throw new Error("Decrypted content is not valid UTF-8 text.");
       } finally {
         plainBytes.fill(0);
       }
@@ -358,8 +513,9 @@
     $("decryptResult").hidden = true;
     $("decryptedText").value = "";
     try {
-      parsePackage(fromBase64Url(extractData(fragment)));
-      notice("Encrypted data detected. Enter its password, or leave blank if no password was used.");
+      const fields = readInput(fragment);
+      const kdf = fields.kdfId === ARGON2ID_ID ? "Argon2id" : "PBKDF2-SHA256";
+      notice(`Encrypted data detected (${kdf}). Enter the password, or leave it empty if none was used.`);
     } catch (error) {
       notice(error.message, "error");
     }
@@ -371,34 +527,40 @@
     const plain = $("plainInput").value;
     const password = $("encryptPassword").value;
     const confirmation = $("confirmPassword").value;
+    const kdfName = $("kdfChoice").value;
     $("encryptPassword").value = "";
     $("confirmPassword").value = "";
     $("encryptResult").hidden = true;
     $("encryptedUrl").value = "";
     $("encryptedData").value = "";
     if (password !== confirmation) return notice("Passwords do not match.", "error");
-    if (!password && !window.confirm("Warning: An empty password provides no meaningful confidentiality. Anyone with the encrypted data can decrypt it by using an empty password. Continue?")) {
+    if (!password && !window.confirm("Warning: An empty password provides no meaningful confidentiality. Anyone with the encrypted data can decrypt it using an empty password. Continue?")) {
       return notice("Encryption cancelled.");
     }
-    if (typeof crypto === "undefined" || !crypto.subtle) return notice("Web Crypto API is unavailable. Open this site over HTTPS.", "error");
+    if (typeof crypto === "undefined" || !crypto.subtle) {
+      return notice("Web Crypto API is unavailable. Open this site over HTTPS.", "error");
+    }
     setBusy(true, "encrypt");
-    notice("Encrypting…");
+    notice(`Encrypting with ${kdfName === "argon2id" ? "Argon2id" : "PBKDF2"}…`);
     try {
-      const data = await encrypt(plain, password);
+      const result = await encrypt(plain, password, kdfName);
       const url = new URL(location.href);
       url.search = "";
-      url.hash = `v=${VERSION}&data=${data}`;
-      $("encryptedData").value = data;
+      url.hash = `v=${result.version}&data=${result.data}`;
+      $("encryptedData").value = result.data;
       $("encryptedUrl").value = url.href;
       $("plainInput").value = "";
       $("encryptResult").hidden = false;
       const size = url.href.length;
       $("urlLengthNote").textContent = size > 8000
-        ? `URL length: ${size.toLocaleString()} characters. It may not work in some apps. Consider copying the encrypted data.`
+        ? `URL length: ${size.toLocaleString()} characters. Some apps may reject it; consider sharing the encrypted data instead.`
         : size > 2000
           ? `URL length: ${size.toLocaleString()} characters. Some apps may truncate it.`
           : `URL length: ${size.toLocaleString()} characters. Share the password separately.`;
-      notice(password ? "Encryption complete. Password and plaintext fields have been cleared." : "Encryption complete WITHOUT A PASSWORD. Anyone with this link can decrypt its contents.", password ? "success" : "error");
+      notice(password
+        ? "Encryption complete. Password and plaintext fields were cleared."
+        : "Encryption complete WITHOUT A PASSWORD. Anyone with the data can decrypt it.",
+        password ? "success" : "error");
     } catch (error) {
       notice(error.message || "Encryption failed.", "error");
     } finally {
@@ -414,13 +576,15 @@
     $("decryptPassword").value = "";
     $("decryptResult").hidden = true;
     $("decryptedText").value = "";
-    if (typeof crypto === "undefined" || !crypto.subtle) return notice("Web Crypto API is unavailable. Open this site over HTTPS.", "error");
+    if (typeof crypto === "undefined" || !crypto.subtle) {
+      return notice("Web Crypto API is unavailable. Open this site over HTTPS.", "error");
+    }
     setBusy(true, "decrypt");
     notice("Decrypting…");
     try {
       $("decryptedText").value = await decrypt(data, password);
       $("decryptResult").hidden = false;
-      notice("Decryption complete. The password field has been cleared.", "success");
+      notice("Decryption complete. The password field was cleared.", "success");
     } catch (error) {
       notice(error.message || "Decryption failed.", "error");
     } finally {
@@ -441,7 +605,7 @@
     for (const id of ["decryptData", "decryptPassword", "decryptedText"]) $(id).value = "";
     $("decryptResult").hidden = true;
     clearAddressFragment();
-    notice("Fields and the current address fragment have been cleared.", "success");
+    notice("Fields and current address fragment have been cleared.", "success");
   });
   $("copyUrl").addEventListener("click", () => copyValue($("encryptedUrl").value, "encryptedUrl"));
   $("copyEncrypted").addEventListener("click", () => copyValue($("encryptedData").value, "encryptedData"));
