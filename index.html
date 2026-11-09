@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6WWG+HHkh0UT0zzqfSyfTbvHIzZhWJMfNLGIuxOsLwY='; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Secure Text · 로컬 암호화</title>
+  <style>
+    :root { color-scheme: light; --bg:#f6f8fc; --panel:#fff; --ink:#172238; --muted:#64748b; --line:#dbe2eb; --accent:#1661d8; --soft:#eff5ff; --danger:#b42318; --shadow:0 16px 48px rgba(18,38,74,.07); }
+    :root[data-theme="dark"] { color-scheme: dark; --bg:#0e1420; --panel:#172131; --ink:#eef3fd; --muted:#a5b3c8; --line:#334259; --accent:#7eafff; --soft:#202f46; --danger:#ff9890; --shadow:none; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme]) { color-scheme: dark; --bg:#0e1420; --panel:#172131; --ink:#eef3fd; --muted:#a5b3c8; --line:#334259; --accent:#7eafff; --soft:#202f46; --danger:#ff9890; --shadow:none; }
+    }
+    * { box-sizing:border-box; }
+    [hidden] { display:none !important; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { max-width:760px; margin:40px auto; padding:0 18px 48px; }
+    header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:20px; }
+    h1 { font-size:clamp(24px,5vw,32px); margin:0; letter-spacing:-.04em; }
+    h2 { font-size:17px; margin:0 0 14px; }
+    p { margin:5px 0 0; }
+    .subtitle,.hint,footer { color:var(--muted); font-size:13px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:var(--shadow); }
+    .tabs { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:5px; margin-bottom:20px; background:var(--soft); border-radius:12px; }
+    button { font:inherit; cursor:pointer; border:1px solid var(--line); border-radius:9px; padding:10px 15px; background:var(--panel); color:var(--ink); }
+    button:hover:not(:disabled) { border-color:var(--accent); }
+    button:focus-visible,textarea:focus-visible,input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .tabs button { border:0; background:transparent; font-weight:650; }
+    .tabs button[aria-selected="true"] { background:var(--panel); color:var(--accent); box-shadow:0 1px 6px rgba(0,0,0,.09); }
+    .theme { white-space:nowrap; font-size:13px; padding:8px 10px; }
+    label { display:block; font-size:14px; font-weight:650; margin:0 0 6px; }
+    .field { margin-bottom:15px; }
+    textarea,input { display:block; width:100%; min-width:0; border:1px solid var(--line); border-radius:9px; background:var(--panel); color:var(--ink); padding:11px 12px; font:14px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    textarea { resize:vertical; min-height:100px; overflow-wrap:anywhere; }
+    input { min-height:43px; }
+    .passwords { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:17px; }
+    .primary { background:var(--accent); border-color:var(--accent); color:var(--bg); font-weight:700; }
+    .primary:hover:not(:disabled) { filter:brightness(1.1); }
+    .result { border-top:1px solid var(--line); margin-top:22px; padding-top:20px; }
+    .result textarea { min-height:74px; }
+    #decryptedText { min-height:150px; }
+    .note { margin-top:10px; padding:9px 12px; border-radius:9px; background:var(--soft); color:var(--muted); font-size:13px; }
+    .status { min-height:25px; margin:15px 0 0; color:var(--muted); font-size:14px; overflow-wrap:anywhere; }
+    .status[data-kind="error"] { color:var(--danger); }
+    .status[data-kind="success"] { color:var(--accent); }
+    footer { margin:16px 3px 0; }
+    @media (max-width:550px) { main { margin:18px auto; } .panel { padding:16px; border-radius:13px; } .passwords { grid-template-columns:1fr; gap:0; } .actions button { flex:1 1 auto; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>🔒 Secure Text</h1>
+      <p class="subtitle">브라우저 안에서만 암호화 · 서버 저장 없음</p>
+    </div>
+    <button id="themeButton" class="theme" type="button" aria-label="테마 전환">테마 변경</button>
+  </header>
+  <div class="panel">
+    <div class="tabs" role="tablist" aria-label="작업 선택">
+      <button id="encryptTab" type="button" role="tab" aria-selected="true" aria-controls="encryptPane">Encrypt</button>
+      <button id="decryptTab" type="button" role="tab" aria-selected="false" aria-controls="decryptPane">Decrypt</button>
+    </div>
+
+    <section id="encryptPane" role="tabpanel" aria-labelledby="encryptTab">
+      <h2>텍스트 암호화</h2>
+      <form id="encryptForm" autocomplete="off">
+        <div class="field">
+          <label for="plainInput">평문</label>
+          <textarea id="plainInput" rows="5" placeholder="암호화할 텍스트를 입력하세요" spellcheck="false" required></textarea>
+          <p class="hint">최대 16 KiB (UTF-8 기준)</p>
+        </div>
+        <div class="passwords">
+          <div class="field">
+            <label for="encryptPassword">비밀번호</label>
+            <input id="encryptPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+          </div>
+          <div class="field">
+            <label for="confirmPassword">비밀번호 확인</label>
+            <input id="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+          </div>
+        </div>
+        <p class="hint">12자 이상 필요. 길고 무작위인 비밀번호를 권장합니다. 비밀번호는 URL에 포함되지 않습니다.</p>
+        <div class="actions">
+          <button id="encryptButton" class="primary" type="submit">암호화</button>
+          <button id="clearEncrypt" type="button">초기화</button>
+        </div>
+      </form>
+      <div id="encryptResult" class="result" hidden>
+        <div class="field">
+          <label for="encryptedUrl">공유 URL</label>
+          <textarea id="encryptedUrl" rows="3" readonly spellcheck="false"></textarea>
+          <div class="actions"><button id="copyUrl" type="button">URL 복사</button></div>
+        </div>
+        <div class="field">
+          <label for="encryptedData">암호문 (Base64URL)</label>
+          <textarea id="encryptedData" rows="3" readonly spellcheck="false"></textarea>
+          <div class="actions"><button id="copyEncrypted" type="button">암호문 복사</button></div>
+        </div>
+        <p id="urlLengthNote" class="note"></p>
+      </div>
+    </section>
+
+    <section id="decryptPane" role="tabpanel" aria-labelledby="decryptTab" hidden>
+      <h2>텍스트 복호화</h2>
+      <form id="decryptForm" autocomplete="off">
+        <div class="field">
+          <label for="decryptData">암호문 또는 공유 URL</label>
+          <textarea id="decryptData" rows="4" spellcheck="false" placeholder="Base64URL 암호문, #data=..., 또는 전체 공유 URL" required></textarea>
+        </div>
+        <div class="field">
+          <label for="decryptPassword">비밀번호</label>
+          <input id="decryptPassword" type="password" autocomplete="off" maxlength="1024" required>
+        </div>
+        <div class="actions">
+          <button id="decryptButton" class="primary" type="submit">복호화</button>
+          <button id="clearDecrypt" type="button">초기화 및 주소창 링크 제거</button>
+        </div>
+      </form>
+      <div id="decryptResult" class="result" hidden>
+        <label for="decryptedText">복호화 결과</label>
+        <textarea id="decryptedText" readonly spellcheck="false"></textarea>
+        <div class="actions"><button id="copyPlain" type="button">평문 복사</button></div>
+      </div>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </div>
+  <footer>Web Crypto API · AES-256-GCM · PBKDF2-SHA256 (600,000회). 공유 URL과 비밀번호는 서로 다른 경로로 전달하세요.</footer>
+</main>
+<script>
+(() => {
+  "use strict";
+
+  const MAGIC_0 = 0x53;
+  const MAGIC_1 = 0x43;
+  const VERSION = 1;
+  const KDF_PBKDF2_SHA256 = 1;
+  const ITERATIONS = 600000;
+  const MAX_ITERATIONS = 2000000;
+  const SALT_BYTES = 16;
+  const IV_BYTES = 12;
+  const HEADER_BYTES = 36;
+  const TAG_BYTES = 16;
+  const MAX_PLAINTEXT_BYTES = 16 * 1024;
+  const MAX_PASSWORD_BYTES = 2048;
+  const MAX_PACKAGE_BYTES = HEADER_BYTES + MAX_PLAINTEXT_BYTES + TAG_BYTES;
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const $ = (id) => document.getElementById(id);
+  let busy = false;
+
+  function notice(message, kind = "info") {
+    $("status").textContent = message;
+    $("status").dataset.kind = kind;
+  }
+
+  function switchMode(mode) {
+    if (busy) return;
+    const encrypting = mode === "encrypt";
+    $("encryptPane").hidden = !encrypting;
+    $("decryptPane").hidden = encrypting;
+    $("encryptTab").setAttribute("aria-selected", String(encrypting));
+    $("decryptTab").setAttribute("aria-selected", String(!encrypting));
+    notice("");
+  }
+
+  function setBusy(value, mode) {
+    busy = value;
+    $("encryptButton").disabled = value;
+    $("decryptButton").disabled = value;
+    $("encryptTab").disabled = value;
+    $("decryptTab").disabled = value;
+    $(mode === "encrypt" ? "encryptButton" : "decryptButton").textContent = value
+      ? "처리 중…" : mode === "encrypt" ? "암호화" : "복호화";
+  }
+
+  function makeHeader(salt, iv) {
+    const header = new Uint8Array(HEADER_BYTES);
+    header[0] = MAGIC_0;
+    header[1] = MAGIC_1;
+    header[2] = VERSION;
+    header[3] = KDF_PBKDF2_SHA256;
+    new DataView(header.buffer).setUint32(4, ITERATIONS, false);
+    header.set(salt, 8);
+    header.set(iv, 24);
+    return header;
+  }
+
+  function parsePackage(packageBytes) {
+    if (packageBytes.length < HEADER_BYTES + TAG_BYTES || packageBytes.length > MAX_PACKAGE_BYTES) {
+      throw new Error("암호문 길이가 올바르지 않거나 허용 범위를 초과했습니다.");
+    }
+    const header = packageBytes.slice(0, HEADER_BYTES);
+    if (header[0] !== MAGIC_0 || header[1] !== MAGIC_1 || header[2] !== VERSION || header[3] !== KDF_PBKDF2_SHA256) {
+      throw new Error("지원하지 않는 암호문 형식 또는 버전입니다.");
+    }
+    const iterations = new DataView(header.buffer).getUint32(4, false);
+    if (iterations < ITERATIONS || iterations > MAX_ITERATIONS) {
+      throw new Error("허용하지 않는 키 유도 반복 횟수입니다.");
+    }
+    return {
+      header,
+      iterations,
+      salt: header.slice(8, 8 + SALT_BYTES),
+      iv: header.slice(24, 24 + IV_BYTES),
+      ciphertext: packageBytes.slice(HEADER_BYTES)
+    };
+  }
+
+  function toBase64Url(bytes) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function fromBase64Url(text) {
+    if (!/^[A-Za-z0-9_-]+$/.test(text) || text.length % 4 === 1 || text.length > Math.ceil(MAX_PACKAGE_BYTES * 4 / 3)) {
+      throw new Error("Base64URL 데이터가 잘못되었거나 너무 깁니다.");
+    }
+    let binary;
+    try {
+      binary = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - text.length % 4) % 4));
+    } catch {
+      throw new Error("Base64URL 디코딩에 실패했습니다.");
+    }
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    if (toBase64Url(bytes) !== text) {
+      throw new Error("Base64URL 데이터 형식이 올바르지 않습니다.");
+    }
+    return bytes;
+  }
+
+  function extractData(input) {
+    let value = input.trim();
+    if (!value) throw new Error("암호문을 입력하세요.");
+    if (/^https?:\/\//i.test(value)) {
+      try {
+        value = new URL(value).hash.slice(1);
+      } catch {
+        throw new Error("올바른 URL이 아닙니다.");
+      }
+    } else if (value.startsWith("#")) {
+      value = value.slice(1);
+    }
+    if (value.startsWith("v=") || value.startsWith("data=")) {
+      const params = new URLSearchParams(value);
+      if (params.getAll("data").length !== 1 || params.getAll("v").length > 1 ||
+          [...params.keys()].some((key) => key !== "v" && key !== "data")) {
+        throw new Error("URL Fragment 구조가 잘못되었습니다.");
+      }
+      if ((params.get("v") ?? "1") !== String(VERSION)) {
+        throw new Error("지원하지 않는 URL 버전입니다.");
+      }
+      value = params.get("data");
+    }
+    return value;
+  }
+
+  function getPasswordBytes(password, enforceMinimum) {
+    if (enforceMinimum && [...password].length < 12) {
+      throw new Error("비밀번호는 최소 12자 이상이어야 합니다.");
+    }
+    if (!password) throw new Error("비밀번호를 입력하세요.");
+    const bytes = encoder.encode(password.normalize("NFC"));
+    if (bytes.length > MAX_PASSWORD_BYTES) {
+      bytes.fill(0);
+      throw new Error("비밀번호가 너무 깁니다.");
+    }
+    return bytes;
+  }
+
+  async function deriveAesKey(passwordBytes, salt, iterations, usage) {
+    const material = await crypto.subtle.importKey("raw", passwordBytes, "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+      material,
+      { name: "AES-GCM", length: 256 },
+      false,
+      [usage]
+    );
+  }
+
+  async function encrypt(plainText, password) {
+    const plainBytes = encoder.encode(plainText);
+    let passwordBytes;
+    try {
+      passwordBytes = getPasswordBytes(password, true);
+      if (plainBytes.length > MAX_PLAINTEXT_BYTES) throw new Error("평문은 UTF-8 기준 16 KiB를 초과할 수 없습니다.");
+      const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+      const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+      const header = makeHeader(salt, iv);
+      const key = await deriveAesKey(passwordBytes, salt, ITERATIONS, "encrypt");
+      const sealed = new Uint8Array(await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv, additionalData: header, tagLength: 128 }, key, plainBytes
+      ));
+      const packed = new Uint8Array(header.length + sealed.length);
+      packed.set(header);
+      packed.set(sealed, header.length);
+      return toBase64Url(packed);
+    } finally {
+      plainBytes.fill(0);
+      if (passwordBytes) passwordBytes.fill(0);
+    }
+  }
+
+  async function decrypt(data, password) {
+    const packed = fromBase64Url(extractData(data));
+    const fields = parsePackage(packed);
+    const passwordBytes = getPasswordBytes(password, false);
+    try {
+      const key = await deriveAesKey(passwordBytes, fields.salt, fields.iterations, "decrypt");
+      let raw;
+      try {
+        raw = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: fields.iv, additionalData: fields.header, tagLength: 128 },
+          key, fields.ciphertext
+        );
+      } catch {
+        throw new Error("비밀번호가 틀렸거나 암호문이 손상되었습니다.");
+      }
+      const plainBytes = new Uint8Array(raw);
+      try {
+        return decoder.decode(plainBytes);
+      } catch {
+        throw new Error("복호화된 데이터가 올바른 UTF-8 텍스트가 아닙니다.");
+      } finally {
+        plainBytes.fill(0);
+      }
+    } finally {
+      passwordBytes.fill(0);
+    }
+  }
+
+  async function copyValue(value, fieldId) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      notice("클립보드에 복사했습니다.", "success");
+    } catch {
+      $(fieldId).focus();
+      $(fieldId).select();
+      notice("자동 복사가 차단되었습니다. 선택된 텍스트를 직접 복사하세요.", "error");
+    }
+  }
+
+  function clearAddressFragment() {
+    if (location.hash) history.replaceState(history.state, "", location.pathname + location.search);
+  }
+
+  function loadFragment() {
+    const fragment = location.hash;
+    if (!fragment || !/(?:^#|&)data=/.test(fragment)) return;
+    switchMode("decrypt");
+    $("decryptData").value = fragment;
+    $("decryptResult").hidden = true;
+    $("decryptedText").value = "";
+    try {
+      parsePackage(fromBase64Url(extractData(fragment)));
+      notice("암호문을 인식했습니다. 비밀번호를 입력하세요.");
+    } catch (error) {
+      notice(error.message, "error");
+    }
+  }
+
+  $("encryptForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    const plain = $("plainInput").value;
+    const password = $("encryptPassword").value;
+    const confirmation = $("confirmPassword").value;
+    $("encryptPassword").value = "";
+    $("confirmPassword").value = "";
+    $("encryptResult").hidden = true;
+    $("encryptedUrl").value = "";
+    $("encryptedData").value = "";
+    if (password !== confirmation) return notice("비밀번호 확인이 일치하지 않습니다.", "error");
+    if (!crypto?.subtle) return notice("HTTPS 환경의 Web Crypto API가 필요합니다.", "error");
+    setBusy(true, "encrypt");
+    notice("암호화 중…");
+    try {
+      const data = await encrypt(plain, password);
+      const url = new URL(location.href);
+      url.search = "";
+      url.hash = `v=${VERSION}&data=${data}`;
+      $("encryptedData").value = data;
+      $("encryptedUrl").value = url.href;
+      $("plainInput").value = "";
+      $("encryptResult").hidden = false;
+      const size = url.href.length;
+      $("urlLengthNote").textContent = size > 8000
+        ? `URL ${size.toLocaleString()}자: 링크 호환성 문제가 발생할 수 있습니다. 암호문 텍스트 복사를 권장합니다.`
+        : size > 2000
+          ? `URL ${size.toLocaleString()}자: 일부 앱에서 잘릴 수 있습니다.`
+          : `URL ${size.toLocaleString()}자. 비밀번호는 다른 경로로 공유하세요.`;
+      notice("암호화 완료. 비밀번호와 입력 평문은 입력 칸에서 지웠습니다.", "success");
+    } catch (error) {
+      notice(error.message || "암호화에 실패했습니다.", "error");
+    } finally {
+      setBusy(false, "encrypt");
+    }
+  });
+
+  $("decryptForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    const data = $("decryptData").value;
+    const password = $("decryptPassword").value;
+    $("decryptPassword").value = "";
+    $("decryptResult").hidden = true;
+    $("decryptedText").value = "";
+    if (!crypto?.subtle) return notice("HTTPS 환경의 Web Crypto API가 필요합니다.", "error");
+    setBusy(true, "decrypt");
+    notice("복호화 중…");
+    try {
+      $("decryptedText").value = await decrypt(data, password);
+      $("decryptResult").hidden = false;
+      notice("복호화 완료. 비밀번호 입력 칸은 비웠습니다.", "success");
+    } catch (error) {
+      notice(error.message || "복호화에 실패했습니다.", "error");
+    } finally {
+      setBusy(false, "decrypt");
+    }
+  });
+
+  $("encryptTab").addEventListener("click", () => switchMode("encrypt"));
+  $("decryptTab").addEventListener("click", () => switchMode("decrypt"));
+  $("clearEncrypt").addEventListener("click", () => {
+    if (busy) return;
+    for (const id of ["plainInput", "encryptPassword", "confirmPassword", "encryptedUrl", "encryptedData"]) $(id).value = "";
+    $("encryptResult").hidden = true;
+    notice("");
+  });
+  $("clearDecrypt").addEventListener("click", () => {
+    if (busy) return;
+    for (const id of ["decryptData", "decryptPassword", "decryptedText"]) $(id).value = "";
+    $("decryptResult").hidden = true;
+    clearAddressFragment();
+    notice("화면 및 현재 주소창의 암호문을 지웠습니다.", "success");
+  });
+  $("copyUrl").addEventListener("click", () => copyValue($("encryptedUrl").value, "encryptedUrl"));
+  $("copyEncrypted").addEventListener("click", () => copyValue($("encryptedData").value, "encryptedData"));
+  $("copyPlain").addEventListener("click", () => copyValue($("decryptedText").value, "decryptedText"));
+
+  const prefersDark = matchMedia("(prefers-color-scheme: dark)");
+  function setTheme(dark) {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    $("themeButton").textContent = dark ? "☀ 라이트" : "☾ 다크";
+    $("themeButton").setAttribute("aria-label", dark ? "라이트 테마로 전환" : "다크 테마로 전환");
+  }
+  setTheme(prefersDark.matches);
+  $("themeButton").addEventListener("click", () => setTheme(document.documentElement.dataset.theme !== "dark"));
+  addEventListener("hashchange", loadFragment);
+  loadFragment();
+})();
+</script>
+</body>
+</html>
