@@ -16,13 +16,26 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Show toolchain versions
+        run: |
+          node --version
+          npm --version
+          cat /etc/os-release | head -n 3
 
       - name: Prepare static website and pinned Argon2id dependency
         shell: bash
@@ -30,23 +43,47 @@ jobs:
           set -euo pipefail
           mkdir -p site/vendor
           cp index.html argon2-worker.js site/
-          printf '' > site/.nojekyll
+          : > site/.nojekyll
+
+          echo 'Downloading hash-wasm@4.12.0 from npm...'
           npm pack hash-wasm@4.12.0 --pack-destination "$RUNNER_TEMP" --silent
-          tar -xOzf "$RUNNER_TEMP/hash-wasm-4.12.0.tgz" package/dist/argon2.umd.min.js > site/vendor/argon2.umd.min.js
-          tar -xOzf "$RUNNER_TEMP/hash-wasm-4.12.0.tgz" package/LICENSE > site/vendor/LICENSE.hash-wasm
-          test -s site/vendor/argon2.umd.min.js
+          package="$RUNNER_TEMP/hash-wasm-4.12.0.tgz"
+          test -s "$package" || { echo '::error::npm tarball missing or empty'; exit 1; }
+
+          echo 'Verifying required entries in the npm tarball...'
+          tar -tzf "$package" > "$RUNNER_TEMP/hash-wasm-contents.txt"
+          grep -E '^package/(dist/argon2\.umd\.min\.js|LICENSE)$' "$RUNNER_TEMP/hash-wasm-contents.txt" || true
+          if ! grep -qx 'package/dist/argon2.umd.min.js' "$RUNNER_TEMP/hash-wasm-contents.txt"; then
+            echo '::error::hash-wasm tarball does not contain dist/argon2.umd.min.js'
+            exit 1
+          fi
+          if ! grep -qx 'package/LICENSE' "$RUNNER_TEMP/hash-wasm-contents.txt"; then
+            echo '::error::hash-wasm tarball does not contain LICENSE'
+            exit 1
+          fi
+
+          tar -xOzf "$package" package/dist/argon2.umd.min.js > site/vendor/argon2.umd.min.js
+          tar -xOzf "$package" package/LICENSE > site/vendor/LICENSE.hash-wasm
+          test -s site/vendor/argon2.umd.min.js || { echo '::error::Argon2id bundle missing or empty'; exit 1; }
+          test -s site/vendor/LICENSE.hash-wasm || { echo '::error::hash-wasm license missing or empty'; exit 1; }
+          echo 'Prepared site files:'
+          find site -type f -printf '%p (%s bytes)\n' | sort
 
       - name: Verify cryptography and data formats
         run: |
+          set -e
+          echo 'Running known-answer and AES-GCM tests...'
           node tests/verify.cjs
+          echo 'Running Web Worker validation tests...'
           node tests/worker-smoke.cjs
+          echo 'Running UI and URL compatibility tests...'
           node tests/contract.cjs
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: site
 

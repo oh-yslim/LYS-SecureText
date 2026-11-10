@@ -38,7 +38,7 @@ const ids = [...html.matchAll(/id="([A-Za-z][A-Za-z0-9]*)"/g)].map((m) => m[1]);
 const elements = Object.fromEntries(ids.map((id) => [id, new Element(id)]));
 const initial = {
   kdfChoice: "argon2id", argonPreset: "balanced", argonMemory: "32",
-  argonPasses: "6", pbkdfIterations: "600000"
+  argonPasses: "6", argonParallelism: "1", pbkdfIterations: "600000"
 };
 for (const [id, value] of Object.entries(initial)) elements[id].value = value;
 const events = {};
@@ -105,6 +105,7 @@ const $ = (id) => elements[id];
 (async () => {
   assert.equal($("argonMemory").value, "32");
   assert.equal($("argonPasses").value, "6");
+  assert.equal($("argonParallelism").value, "1");
   assert.match($("argonCompatibility").textContent || html, /Decryption requires the same/);
   assert.match($("passwordAdvice").textContent, /empty password/i);
 
@@ -112,32 +113,65 @@ const $ = (id) => elements[id];
   await $("argonPreset").trigger("change");
   assert.equal($("argonMemory").value, 256);
   assert.equal($("argonPasses").value, 6);
+  assert.equal($("argonParallelism").value, 1);
   assert.match($("resourceAdvice").textContent, /Warning:/);
   $("argonPasses").value = "10";
   await $("argonPasses").trigger("input");
   assert.equal($("argonPreset").value, "custom");
   assert.match($("benchmarkStatus").textContent, /Not tested/);
 
-  // Worker is a local protocol stub; actual hash-wasm is tested in verify.cjs.
+  // The Worker stub validates the browser protocol; real WASM vectors run in verify.cjs.
   $("argonMemory").value = "19";
   $("argonPasses").value = "2";
-  $("plainInput").value = "Hello 한글 日本語 😀";
-  $("encryptPassword").value = "";
-  $("confirmPassword").value = "";
+  for (const parallelism of [1, 2, 3, 4]) {
+    $("argonParallelism").value = String(parallelism);
+    await $("argonParallelism").trigger("input");
+    assert.equal($("argonPreset").value, "custom");
+    assert.match($("resourceAdvice").textContent, new RegExp(`parallelism ${parallelism}`));
+    $("plainInput").value = `Hello 한글 日本語 😀 p=${parallelism}`;
+    $("encryptPassword").value = "";
+    $("confirmPassword").value = "";
+    await $("encryptForm").trigger("submit");
+    const argonData = $("encryptedData").value;
+    assert.ok(argonData.length > 20);
+    assert.match($("encryptedUrl").value, /#data=/);
+    assert.doesNotMatch($("encryptedUrl").value, /#v=/);
+    const payload = Buffer.from(argonData.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    assert.equal(payload.readUInt8(2), 2);
+    assert.equal(payload.readUInt32BE(4), 19 * 1024);
+    assert.equal(payload.readUInt32BE(8), 2);
+    assert.equal(payload.readUInt8(12), parallelism);
+    $("decryptData").value = "#v=2&data=" + argonData;
+    await $("decryptData").trigger("input");
+    assert.match($("decryptAdvice").textContent, new RegExp(`parallelism ${parallelism}`));
+    $("decryptPassword").value = "";
+    await $("decryptForm").trigger("submit");
+    assert.equal($("decryptedText").value, `Hello 한글 日本語 😀 p=${parallelism}`);
+
+    // Reject tampering of a valid header. The parameter is authenticated with AES-GCM.
+    if (parallelism === 4) {
+      const edited = Buffer.from(payload);
+      edited[12] = 3;
+      $("decryptData").value = "#data=" + edited.toString("base64url");
+      $("decryptPassword").value = "";
+      await $("decryptForm").trigger("submit");
+      assert.match($("status").textContent, /Incorrect password or corrupted/);
+    }
+  }
+
+  // Validate and preserve legacy Argon2id p=1 / 32 MiB / three-pass ciphertexts.
+  $("argonPreset").value = "compatibility";
+  await $("argonPreset").trigger("change");
+  assert.equal($("argonParallelism").value, 1);
+  $("plainInput").value = "Legacy Argon2id p=1";
+  $("encryptPassword").value = "test-password";
+  $("confirmPassword").value = "test-password";
   await $("encryptForm").trigger("submit");
-  const argonData = $("encryptedData").value;
-  assert.ok(argonData.length > 20);
-  assert.match($("encryptedUrl").value, /#data=/);
-  assert.doesNotMatch($("encryptedUrl").value, /#v=/);
-  let payload = Buffer.from(argonData.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-  assert.equal(payload.readUInt8(2), 2);
-  assert.equal(payload.readUInt32BE(4), 19 * 1024);
-  assert.equal(payload.readUInt32BE(8), 2);
-  assert.equal(payload.readUInt8(12), 1);
-  $("decryptData").value = "#v=2&data=" + argonData;
-  $("decryptPassword").value = "";
+  const legacyArgonData = $("encryptedData").value;
+  $("decryptData").value = "#v=2&data=" + legacyArgonData;
+  $("decryptPassword").value = "test-password";
   await $("decryptForm").trigger("submit");
-  assert.equal($("decryptedText").value, "Hello 한글 日本語 😀");
+  assert.equal($("decryptedText").value, "Legacy Argon2id p=1");
 
   $("kdfChoice").value = "pbkdf2";
   await $("kdfChoice").trigger("input");
@@ -149,7 +183,7 @@ const $ = (id) => elements[id];
   await $("encryptForm").trigger("submit");
   const pbkdfData = $("encryptedData").value;
   assert.ok(pbkdfData);
-  payload = Buffer.from(pbkdfData.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  const payload = Buffer.from(pbkdfData.replace(/-/g, "+").replace(/_/g, "/"), "base64");
   assert.equal(payload.readUInt8(2), 1);
   assert.equal(payload.readUInt32BE(4), 1000000);
   $("decryptData").value = "#v=1&data=" + pbkdfData;
@@ -170,12 +204,20 @@ const $ = (id) => elements[id];
 
   $("kdfChoice").value = "argon2id";
   await $("kdfChoice").trigger("input");
+  $("argonParallelism").value = "0";
+  await $("argonParallelism").trigger("input");
+  assert.match($("resourceAdvice").textContent, /1–4 lanes/);
+  $("argonParallelism").value = "5";
+  await $("argonParallelism").trigger("input");
+  assert.match($("resourceAdvice").textContent, /1–4 lanes/);
+  $("argonParallelism").value = "4";
   $("argonMemory").value = "257";
   await $("argonMemory").trigger("input");
   await $("runBenchmark").trigger("click");
   assert.match($("benchmarkStatus").textContent, /19–256/);
   $("argonMemory").value = "32";
   $("argonPasses").value = "6";
+  $("argonParallelism").value = "4";
   await $("runBenchmark").trigger("click");
   assert.match($("benchmarkStatus").textContent, /ms total on this device/);
   assert.equal($("runBenchmark").disabled, false);
@@ -185,5 +227,5 @@ const $ = (id) => elements[id];
   await cancellable;
   assert.match($("benchmarkStatus").textContent, /cancelled/i);
   assert.equal($("runBenchmark").disabled, false);
-  console.log("PASS: CSP, live guidance, presets, KDF bounds, v1/v2 round-trip, Unicode, empty password, benchmark UI");
+  console.log("PASS: CSP, live guidance, presets, KDF bounds, v1/v2 and p=1..4 round-trip, header integrity, Unicode, empty password, benchmark UI");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

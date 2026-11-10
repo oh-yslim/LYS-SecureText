@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="light dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-QUJP8r2ONgFzKlDuih6FSeBnUJmZAtj6HiycypwUgb0=' 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-UY8Opw/ntXrGyxrXdEZXf4mMeoVQV0fanqNxhSC0gNg=' 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'">
   <title>CipherLink Lite · Browser-only encryption</title>
   <style>
     :root { color-scheme: light; --bg:#f6f8fc; --panel:#fff; --ink:#172238; --muted:#64748b; --line:#dbe2eb; --accent:#1661d8; --soft:#eff5ff; --danger:#b42318; --shadow:0 16px 48px rgba(18,38,74,.07); }
@@ -119,15 +119,19 @@
               <label for="argonPasses">Iterations (passes)</label>
               <input id="argonPasses" type="number" min="2" max="10" step="1" value="6" required>
             </div>
+            <div class="field">
+              <label for="argonParallelism">Parallelism (lanes)</label>
+              <input id="argonParallelism" type="number" min="1" max="4" step="1" value="1" required>
+            </div>
           </div>
-          <p id="argonCompatibility" class="guidance">Decryption requires the same Argon2id memory and iteration settings. High values may prevent decryption on low-memory devices.</p>
+          <p id="argonCompatibility" class="guidance">Decryption requires the same Argon2id memory, iteration, and parallelism settings. High values may prevent decryption on low-memory devices.</p>
           <div id="pbkdfSettings" class="settings" hidden>
             <div class="field">
               <label for="pbkdfIterations">PBKDF2 iterations</label>
               <input id="pbkdfIterations" type="number" min="600000" max="2000000" step="1" value="600000" disabled>
             </div>
           </div>
-          <p class="hint">Argon2id parallelism remains fixed at 1 pending device compatibility tests. Settings are embedded in the ciphertext and cannot be lowered during decryption.</p>
+          <p class="hint">Parallelism supports 1–4 lanes. This does not guarantee multiple CPU threads or faster execution. Settings are embedded in the ciphertext and must be reused during decryption.</p>
           <p id="resourceAdvice" class="guidance" role="status" aria-live="polite"></p>
           <div class="benchmark">
             <strong>Device Benchmark</strong>
@@ -217,7 +221,9 @@
   const ARGON_MAX_MEMORY_KIB = 256 * 1024;
   const ARGON_MIN_PASSES = 2;
   const ARGON_MAX_PASSES = 10;
-  const ARGON_PARALLELISM = 1;
+  const DEFAULT_ARGON_PARALLELISM = 1;
+  const ARGON_MIN_PARALLELISM = 1;
+  const ARGON_MAX_PARALLELISM = 4;
   const SALT_BYTES = 16;
   const IV_BYTES = 12;
   const V1_HEADER_BYTES = 36;
@@ -257,8 +263,8 @@
     $("decryptButton").disabled = value;
     $("encryptTab").disabled = value;
     $("decryptTab").disabled = value;
-    for (const id of ["kdfChoice", "argonPreset", "argonMemory", "argonPasses", "pbkdfIterations", "encryptPassword", "confirmPassword"]) {
-      const argonOnly = ["argonPreset", "argonMemory", "argonPasses"].includes(id);
+    for (const id of ["kdfChoice", "argonPreset", "argonMemory", "argonPasses", "argonParallelism", "pbkdfIterations", "encryptPassword", "confirmPassword"]) {
+      const argonOnly = ["argonPreset", "argonMemory", "argonPasses", "argonParallelism"].includes(id);
       const pbkdfOnly = id === "pbkdfIterations";
       $(id).disabled = value || (argonOnly && $("kdfChoice").value !== "argon2id") ||
         (pbkdfOnly && $("kdfChoice").value !== "pbkdf2");
@@ -285,10 +291,12 @@
     if (choice === "argon2id") {
       const memoryMiB = $("argonMemory").valueAsNumber;
       const iterations = $("argonPasses").valueAsNumber;
-      if (!integerInRange(memoryMiB, 19, 256) || !integerInRange(iterations, ARGON_MIN_PASSES, ARGON_MAX_PASSES)) {
-        throw new Error("Argon2id requires 19–256 MiB of memory and 2–10 passes.");
+      const parallelism = $("argonParallelism").valueAsNumber;
+      if (!integerInRange(memoryMiB, 19, 256) || !integerInRange(iterations, ARGON_MIN_PASSES, ARGON_MAX_PASSES) ||
+          !integerInRange(parallelism, ARGON_MIN_PARALLELISM, ARGON_MAX_PARALLELISM)) {
+        throw new Error("Argon2id requires 19–256 MiB of memory, 2–10 passes, and 1–4 lanes.");
       }
-      return { kdfName: choice, memorySize: memoryMiB * 1024, iterations, parallelism: ARGON_PARALLELISM };
+      return { kdfName: choice, memorySize: memoryMiB * 1024, iterations, parallelism };
     }
     throw new Error("Unknown key derivation method.");
   }
@@ -302,6 +310,7 @@
     if (!busy) {
       $("argonMemory").disabled = !argon;
       $("argonPasses").disabled = !argon;
+      $("argonParallelism").disabled = !argon;
       $("argonPreset").disabled = !argon;
       $("pbkdfIterations").disabled = argon;
     }
@@ -333,9 +342,13 @@
       const settings = encryptionSettings();
       if (argon) {
         const memory = settings.memorySize / 1024;
-        message = `Argon2id: ${memory} MiB, ${settings.iterations} passes, parallelism 1. The same costs apply when decrypting.`;
+        message = `Argon2id: ${memory} MiB, ${settings.iterations} passes, parallelism ${settings.parallelism}. The same parameters are required when decrypting.`;
         if (memory > 64 || settings.iterations > 6) {
           message += " Warning: High settings may be slow or run out of memory on mobile devices.";
+          kind = "warning";
+        }
+        if (settings.parallelism > 1) {
+          message += " Non-default parallelism: test decryption on the intended devices before sharing.";
           kind = "warning";
         }
       } else {
@@ -365,7 +378,7 @@
     return header;
   }
 
-  function makeV2Header(salt, iv, memorySize, iterations) {
+  function makeV2Header(salt, iv, memorySize, iterations, parallelism) {
     const header = new Uint8Array(V2_HEADER_BYTES);
     const view = new DataView(header.buffer);
     header[0] = MAGIC_0;
@@ -374,7 +387,7 @@
     header[3] = ARGON2ID_ID;
     view.setUint32(4, memorySize, false);
     view.setUint32(8, iterations, false);
-    header[12] = ARGON_PARALLELISM;
+    header[12] = parallelism;
     header.set(salt, 16);
     header.set(iv, 32);
     return header;
@@ -420,7 +433,7 @@
       if (!integerInRange(memorySize, ARGON_MIN_MEMORY_KIB, ARGON_MAX_MEMORY_KIB) ||
           memorySize % 1024 !== 0 ||
           !integerInRange(iterations, ARGON_MIN_PASSES, ARGON_MAX_PASSES) ||
-          parallelism !== ARGON_PARALLELISM || header[13] !== 0 ||
+          !integerInRange(parallelism, ARGON_MIN_PARALLELISM, ARGON_MAX_PARALLELISM) || header[13] !== 0 ||
           header[14] !== 0 || header[15] !== 0) {
         throw new Error("Unsupported Argon2id parameters or header flags.");
       }
@@ -612,7 +625,7 @@
       const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
       const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
       const header = settings.kdfName === "argon2id" ?
-        makeV2Header(salt, iv, settings.memorySize, settings.iterations) :
+        makeV2Header(salt, iv, settings.memorySize, settings.iterations, settings.parallelism) :
         settings.kdfName === "pbkdf2" ? makeV1Header(salt, iv, settings.iterations) : null;
       if (!header) throw new Error("Unknown key derivation method.");
       const fields = parsePackage(new Uint8Array([...header, ...new Uint8Array(TAG_BYTES)]));
@@ -666,6 +679,7 @@
     if (!values || busy) return;
     $("argonMemory").value = values[0];
     $("argonPasses").value = values[1];
+    $("argonParallelism").value = DEFAULT_ARGON_PARALLELISM;
     invalidateBenchmark();
     updateGuidance();
   }
@@ -753,10 +767,11 @@
       const fields = readInput(input);
       if (fields.kdfId === ARGON2ID_ID) {
         const memory = fields.memorySize / 1024;
-        guidance.textContent = `Argon2id: ${memory} MiB, ${fields.iterations} passes, parallelism 1. ` +
+        guidance.textContent = `Argon2id: ${memory} MiB, ${fields.iterations} passes, parallelism ${fields.parallelism}. ` +
           "Decryption requires the original settings on this device." +
-          (memory > 64 || fields.iterations > 6 ? " Warning: This link may be slow or may fail on low-memory devices." : "");
-        guidance.dataset.kind = memory > 64 || fields.iterations > 6 ? "warning" : "info";
+          (memory > 64 || fields.iterations > 6 ? " Warning: This link may be slow or may fail on low-memory devices." : "") +
+          (fields.parallelism > 1 ? " Non-default parallelism: use a compatible device to decrypt this link." : "");
+        guidance.dataset.kind = memory > 64 || fields.iterations > 6 || fields.parallelism > 1 ? "warning" : "info";
       } else {
         guidance.textContent = `PBKDF2-SHA256: ${fields.iterations.toLocaleString("en-US")} iterations.`;
       }
@@ -855,10 +870,10 @@
     }
   });
 
-  for (const id of ["kdfChoice", "argonMemory", "argonPasses", "pbkdfIterations", "encryptPassword", "confirmPassword"]) {
+  for (const id of ["kdfChoice", "argonMemory", "argonPasses", "argonParallelism", "pbkdfIterations", "encryptPassword", "confirmPassword"]) {
     $(id).addEventListener("input", () => {
-      if (["kdfChoice", "argonMemory", "argonPasses", "pbkdfIterations"].includes(id)) invalidateBenchmark();
-      if (id === "argonMemory" || id === "argonPasses") $("argonPreset").value = "custom";
+      if (["kdfChoice", "argonMemory", "argonPasses", "argonParallelism", "pbkdfIterations"].includes(id)) invalidateBenchmark();
+      if (id === "argonMemory" || id === "argonPasses" || id === "argonParallelism") $("argonPreset").value = "custom";
       updateGuidance();
     });
   }

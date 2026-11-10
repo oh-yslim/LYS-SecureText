@@ -11,7 +11,8 @@ self.onmessage = async (event) => {
     if (!Number.isSafeInteger(input.memorySize) || input.memorySize < 19 * 1024 ||
         input.memorySize > 256 * 1024 || input.memorySize % 1024 !== 0 ||
         !Number.isSafeInteger(input.iterations) || input.iterations < 2 ||
-        input.iterations > 10 || input.parallelism !== 1 ||
+        input.iterations > 10 || !Number.isSafeInteger(input.parallelism) ||
+        input.parallelism < 1 || input.parallelism > 4 ||
         salt.length !== 16 || password.length > 2048) {
       code = "INVALID_PARAMETERS";
       throw new Error(code);
